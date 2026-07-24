@@ -170,6 +170,17 @@ export async function GET() {
     }
   }
 
+  const sqlitePath = typeof sqlite === "object" && sqlite && "path" in sqlite
+    ? String((sqlite as { path?: string | null }).path ?? "")
+    : "";
+  const dbInsideDeploy = sqlitePath.includes("/nodejs/");
+
+  let persistenceHint: string | undefined;
+  if (dbInsideDeploy) {
+    persistenceHint =
+      "UYARI: Veritabanı nodejs/ içinde — Redeploy siler. .env'e WASYS_DATA_DIR=/home/u781807728/wasys-data ve DATABASE_URL=file:/home/u781807728/wasys-data/prod.db yazıp Restart edin.";
+  }
+
   return NextResponse.json(
     {
       ok,
@@ -178,12 +189,14 @@ export async function GET() {
         DATABASE_URL: hasDatabaseUrl,
         DATABASE_CONNECTED: databaseConnected,
         AUTH_URL: Boolean(authUrl),
+        PERSISTENT_DB: databaseConnected ? !dbInsideDeploy : null,
       },
       database: {
         userCount,
         error: databaseError,
         selfHeal,
         sqlite,
+        wasysDataDir: process.env.WASYS_DATA_DIR ?? null,
       },
       platformAdmin,
       whatsappGateway: {
@@ -198,8 +211,8 @@ export async function GET() {
         : !databaseConnected
           ? databaseError?.code === "P2021"
             ? "Tablolar yok ve otomatik onarım (init.sql) başarısız oldu. Bu sayfayı yenileyin; olmazsa health.database.error mesajına bakın ve Redeploy edin."
-            : "SQLite açılamıyor. DATABASE_URL=file:/home/u781807728/domains/wasys.pro/nodejs/data/prod.db; Entry file=server.js; Redeploy. health.database.sqlite alanına bakın."
-        : adminHint,
+            : "SQLite açılamıyor. DATABASE_URL=file:/home/u781807728/wasys-data/prod.db; mkdir -p /home/u781807728/wasys-data; Entry file=server.js; Redeploy."
+          : persistenceHint ?? adminHint,
     },
     {
       status: ok ? 200 : 503,

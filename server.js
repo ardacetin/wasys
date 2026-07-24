@@ -81,6 +81,14 @@ function normalizeDatabaseUrl() {
 
 normalizeDatabaseUrl();
 
+// Redeploy-safe persistent paths (outside nodejs/): SQLite + WhatsApp sessions.
+// Overrides DATABASE_URL if it still points inside the deploy tree.
+try {
+  require("./prisma/persistent-paths.cjs").ensurePersistentDatabaseUrl();
+} catch (error) {
+  console.error("[WASYS] persistent path setup failed", error);
+}
+
 function prismaCli() {
   const cli = resolve(projectRoot, "node_modules/prisma/build/index.js");
   if (!existsSync(cli)) {

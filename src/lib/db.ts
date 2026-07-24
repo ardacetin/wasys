@@ -4,9 +4,12 @@ import {
   accessSync,
   closeSync,
   constants,
+  copyFileSync,
+  existsSync,
   mkdirSync,
   openSync,
   readFileSync,
+  statSync,
 } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 
@@ -17,28 +20,15 @@ const globalForPrisma = globalThis as unknown as {
 };
 
 /**
- * Hostinger often sets DATABASE_URL to a path outside nodejs/ that is not writable
- * (SQLite Error 14). Normalize to a writable file URL before Prisma connects.
+ * Hostinger often sets DATABASE_URL inside nodejs/ which Redeploy wipes.
+ * Prefer /home/u781807728/wasys-data/prod.db (outside deploy tree).
  */
 function ensureSqliteDatabaseUrl() {
   if (globalForPrisma.__wasysSqliteReady) return;
   globalForPrisma.__wasysSqliteReady = true;
 
   const configured = process.env.DATABASE_URL?.trim();
-  if (!configured?.startsWith("file:")) return;
-
-  const resolveSqlitePath = (databaseUrl: string) => {
-    const raw = decodeURIComponent(
-      databaseUrl.slice("file:".length).split("?")[0],
-    );
-    const configuredPath = raw
-      .replace(/^\/\/\//, "/")
-      .replace(/^\/\/[^/]*/, "");
-
-    if (isAbsolute(configuredPath)) return configuredPath;
-    // Prisma resolves relative SQLite paths against the schema directory.
-    return resolve(process.cwd(), "prisma", configuredPath);
-  };
+  if (configured && !configured.startsWith("file:")) return;
 
   const ensureWritable = (databasePath: string) => {
     const directory = dirname(databasePath);
@@ -52,16 +42,68 @@ function ensureSqliteDatabaseUrl() {
     }
   };
 
-  const fallbackPath = resolve(process.cwd(), "data", "prod.db");
+  const resolveSqlitePath = (databaseUrl: string) => {
+    const raw = decodeURIComponent(
+      databaseUrl.slice("file:".length).split("?")[0],
+    );
+    const configuredPath = raw
+      .replace(/^\/\/\//, "/")
+      .replace(/^\/\/[^/]*/, "");
+    if (isAbsolute(configuredPath)) return configuredPath;
+    return resolve(process.cwd(), "prisma", configuredPath);
+  };
+
+  const persistentRoot =
+    process.env.WASYS_DATA_DIR?.trim() ||
+    (existsSync("/home/u781807728")
+      ? "/home/u781807728/wasys-data"
+      : resolve(process.cwd(), "data"));
+  const preferredPath = resolve(persistentRoot, "prod.db");
+
+  // Eski nodejs/data dosyasını bir kez kalıcı yola kopyala
+  const legacy = resolve(process.cwd(), "data", "prod.db");
+  try {
+    if (
+      existsSync(legacy) &&
+      statSync(legacy).size > 0 &&
+      (!existsSync(preferredPath) || statSync(preferredPath).size === 0) &&
+      resolve(legacy) !== resolve(preferredPath)
+    ) {
+      mkdirSync(persistentRoot, { recursive: true });
+      copyFileSync(legacy, preferredPath);
+      console.log(`[WASYS DB] Migrated ${legacy} → ${preferredPath}`);
+    }
+  } catch {
+    // ignore migration errors
+  }
 
   try {
-    const databasePath = resolveSqlitePath(configured);
-    ensureWritable(databasePath);
-    process.env.DATABASE_URL = `file:${databasePath}`;
+    mkdirSync(persistentRoot, { recursive: true });
+    accessSync(persistentRoot, constants.W_OK);
+
+    let target = preferredPath;
+    if (configured?.startsWith("file:")) {
+      const databasePath = resolveSqlitePath(configured);
+      const insideDeploy = databasePath.includes("/nodejs/");
+      if (!insideDeploy) target = databasePath;
+      else {
+        console.warn(
+          `[WASYS DB] DATABASE_URL under deploy tree (${databasePath}); using ${preferredPath}`,
+        );
+      }
+    }
+
+    ensureWritable(target);
+    process.env.DATABASE_URL = `file:${target}`;
+    process.env.WASYS_DATA_DIR = persistentRoot;
+    if (!process.env.GATEWAY_DATA_DIR) {
+      process.env.GATEWAY_DATA_DIR = persistentRoot;
+    }
   } catch (error) {
+    const fallbackPath = resolve(process.cwd(), "data", "prod.db");
     const reason = error instanceof Error ? error.message : String(error);
     console.error(
-      `[WASYS DB] Cannot use DATABASE_URL=${configured} (${reason}). Falling back to ${fallbackPath}`,
+      `[WASYS DB] Cannot use persistent DB (${reason}). Falling back to ${fallbackPath}`,
     );
     ensureWritable(fallbackPath);
     process.env.DATABASE_URL = `file:${fallbackPath}`;

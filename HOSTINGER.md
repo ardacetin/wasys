@@ -32,24 +32,33 @@ cd ~/domains/wasys.pro/nodejs
 npm run db:bootstrap
 ```
 
-`.env` / panelde SQLite yolu **yazılabilir** absolute path olmalı:
+`.env` / panelde SQLite yolu **yazılabilir** absolute path olmalı ve
+**`nodejs/` dışında** olmalı (Redeploy `nodejs/` içeriğini siler):
 
 ```env
-DATABASE_URL=file:/home/u781807728/domains/wasys.pro/nodejs/data/prod.db
+WASYS_DATA_DIR=/home/u781807728/wasys-data
+DATABASE_URL=file:/home/u781807728/wasys-data/prod.db
+GATEWAY_DATA_DIR=/home/u781807728/wasys-data
 ```
 
+Eski `nodejs/data/prod.db` yolu Redeploy sonrası müşteri verilerini siler.
+Uygulama açılışta eski dosyayı bir kez `wasys-data/` altına taşımaya çalışır.
+
 **Error 14 / Unable to open the database file** = klasör yok veya yazma izni yok.
-Hostinger Node çoğu zaman `domains/wasys.pro/data` (nodejs dışı) yoluna yazamaz.
-Bu yüzden varsayılan yol `nodejs/data/prod.db`.
+File Manager veya SSH ile bir kez oluşturun:
+
+```bash
+mkdir -p /home/u781807728/wasys-data
+```
 
 Kontrol listesi:
-1. File Manager → `nodejs/data` klasörünü oluştur (boş olabilir)
-2. `DATABASE_URL` yukarıdaki gibi olsun (panel **ve** `nodejs/.env`)
+1. `mkdir -p /home/u781807728/wasys-data` (SSH veya File Manager → home)
+2. `.env` içinde yukarıdaki `WASYS_DATA_DIR` + `DATABASE_URL` (panel **ve** `nodejs/.env`)
 3. hPanel Node.js → **Application startup file / Entry file** = `server.js`
    (Hostinger’da `npm start` alanı olmayabilir — entry file kullan)
 4. Build command varsa: `npm run build`
 5. Redeploy / Restart
-6. https://wasys.pro/api/health → `DATABASE_CONNECTED: true`
+6. https://wasys.pro/api/health → `DATABASE_CONNECTED: true` ve sqlite.path `wasys-data` içermeli
 
 ### SSH’te `npm: command not found`
 
