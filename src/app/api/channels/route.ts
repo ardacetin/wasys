@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { verifyCloudCredentials } from "@/lib/wa-cloud";
 
 export async function GET() {
   const session = await auth();
@@ -25,17 +26,55 @@ export async function POST(req: Request) {
   const body = await req.json();
   const type = body.type === "WHATSAPP_CLOUD" ? "WHATSAPP_CLOUD" : "WHATSAPP_QR";
 
+  if (type === "WHATSAPP_CLOUD") {
+    const metaPhoneId = String(body.metaPhoneId ?? "").trim();
+    const metaToken = String(body.metaToken ?? "").trim();
+    if (!metaPhoneId || !metaToken) {
+      return NextResponse.json(
+        { error: "Phone Number ID ve Access Token zorunludur" },
+        { status: 400 },
+      );
+    }
+
+    const verify = await verifyCloudCredentials({
+      phoneNumberId: metaPhoneId,
+      accessToken: metaToken,
+    });
+    if (!verify.ok) {
+      return NextResponse.json(
+        { error: `Meta doğrulama başarısız: ${verify.error}` },
+        { status: 400 },
+      );
+    }
+
+    const channel = await prisma.channel.create({
+      data: {
+        organizationId: session.user.organizationId,
+        name: body.name?.trim() || "WhatsApp Cloud",
+        type: "WHATSAPP_CLOUD",
+        status: "CONNECTED",
+        connectedAt: new Date(),
+        metaPhoneId,
+        metaToken,
+        metaWabaId: body.metaWabaId?.trim() || null,
+        phoneNumber:
+          String(body.phoneNumber ?? "").replace(/\D/g, "") ||
+          verify.displayPhone ||
+          null,
+        lastError: null,
+      },
+    });
+
+    return NextResponse.json({ channel });
+  }
+
   const channel = await prisma.channel.create({
     data: {
       organizationId: session.user.organizationId,
-      name: body.name ?? (type === "WHATSAPP_QR" ? "WhatsApp QR" : "WhatsApp Cloud"),
-      type,
+      name: body.name ?? "WhatsApp QR",
+      type: "WHATSAPP_QR",
       status: "DISCONNECTED",
-      sessionId: type === "WHATSAPP_QR" ? `sess_${Date.now().toString(36)}` : null,
-      metaPhoneId: body.metaPhoneId ?? null,
-      metaToken: body.metaToken ?? null,
-      metaWabaId: body.metaWabaId ?? null,
-      phoneNumber: body.phoneNumber ?? null,
+      sessionId: `sess_${Date.now().toString(36)}`,
     },
   });
 

@@ -100,6 +100,10 @@ export default function ChannelsPage() {
       body: JSON.stringify({ type: "WHATSAPP_CLOUD", ...cloudForm }),
     });
     const data = await res.json();
+    if (!res.ok) {
+      alert(data.error ?? "Cloud kanalı eklenemedi");
+      return;
+    }
     if (data.channel) {
       setChannels((prev) => [...prev, data.channel]);
       setCloudForm({
@@ -155,9 +159,40 @@ export default function ChannelsPage() {
                   </button>
                 )
               ) : (
-                <span className="rounded-full bg-brand-soft px-3 py-1 text-xs font-medium text-brand-deep">
-                  Webhook: /api/webhooks/meta
-                </span>
+                <div className="flex flex-col items-end gap-2">
+                  <span className="rounded-full bg-brand-soft px-3 py-1 text-xs font-medium text-brand-deep">
+                    Webhook: /api/webhooks/meta
+                  </span>
+                  <button
+                    type="button"
+                    disabled={loadingId === channel.id}
+                    onClick={async () => {
+                      setLoadingId(channel.id);
+                      const res = await fetch(`/api/channels/${channel.id}/cloud`, {
+                        method: "POST",
+                      });
+                      const data = await res.json();
+                      setLoadingId(null);
+                      if (data.error) {
+                        alert(data.error);
+                        if (data.channel) {
+                          setChannels((prev) =>
+                            prev.map((c) => (c.id === channel.id ? data.channel : c)),
+                          );
+                        }
+                        return;
+                      }
+                      if (data.channel) {
+                        setChannels((prev) =>
+                          prev.map((c) => (c.id === channel.id ? data.channel : c)),
+                        );
+                      }
+                    }}
+                    className="rounded-xl border border-line bg-white px-3 py-1.5 text-xs font-semibold hover:bg-brand-soft disabled:opacity-60"
+                  >
+                    {loadingId === channel.id ? "Doğrulanıyor…" : "Meta ile doğrula"}
+                  </button>
+                </div>
               )}
             </div>
 
@@ -201,7 +236,13 @@ export default function ChannelsPage() {
 
       <form onSubmit={addCloudChannel} className="rounded-2xl border border-line bg-bg-elevated p-5">
         <h2 className="font-[family-name:var(--font-display)] text-xl">WhatsApp Cloud API ekle</h2>
-        <p className="mt-1 text-sm text-ink-muted">Meta Business hesabınızdan token ve phone number ID girin.</p>
+        <p className="mt-1 text-sm text-ink-muted">
+          Meta Business → WhatsApp → API Setup bilgilerini girin. Kayıt sırasında token
+          Meta&apos;da doğrulanır. Webhook URL:{" "}
+          <code className="text-xs">https://wasys.pro/api/webhooks/meta</code>
+          {" · "}
+          Verify token: <code className="text-xs">META_VERIFY_TOKEN</code> (.env)
+        </p>
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           {(
             [
