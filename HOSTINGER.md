@@ -32,9 +32,15 @@ cd ~/domains/wasys.pro/nodejs
 npm run db:bootstrap
 ```
 
-`.env` içindeki SQLite yolu `DATABASE_URL=file:./prod.db` olmalı. Prisma göreli
-yolu `prisma/schema.prisma` konumuna göre çözer; dosya `prisma/prod.db` olarak oluşur.
-`file:./data/prod.db` kullanılırsa `prisma/data` bulunmadığında DB bağlantısı başarısız olur.
+`.env` içindeki SQLite yolu deploy klasörünün dışında, kalıcı bir absolute path olmalı:
+
+```env
+DATABASE_URL=file:/home/u781807728/domains/wasys.pro/data/prod.db
+```
+
+Hostinger deploy sırasında `nodejs/` klasörünü yeniden oluşturabilir. DB bu klasörde
+olursa silinebilir veya runtime tarafından bulunamayabilir. `prepare-db.mjs`, kalıcı
+`data/` klasörünü build/start öncesi otomatik oluşturur.
 
 `db:bootstrap` mevcut müşteri verilerini silmez; yalnızca sunucu environment
 variable’larında tanımlanan platform yöneticisini idempotent olarak hazırlar.

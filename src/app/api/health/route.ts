@@ -11,6 +11,7 @@ export async function GET() {
 
   let databaseConnected = false;
   let userCount: number | null = null;
+  let databaseError: { name: string; code: string | null } | null = null;
 
   if (hasDatabaseUrl) {
     try {
@@ -18,6 +19,16 @@ export async function GET() {
       databaseConnected = true;
     } catch (error) {
       console.error("[WASYS Health] database readiness check failed", error);
+      databaseError = {
+        name: error instanceof Error ? error.name : "UnknownError",
+        code:
+          typeof error === "object" &&
+          error !== null &&
+          "code" in error &&
+          typeof error.code === "string"
+            ? error.code
+            : null,
+      };
     }
   }
 
@@ -34,12 +45,13 @@ export async function GET() {
       },
       database: {
         userCount,
+        error: databaseError,
       },
       authUrlHint: authUrl ? authUrl.replace(/^(https?:\/\/[^/]+).*/, "$1") : null,
       hint: !hasAuthSecret
         ? "Create a .env file in the Hostinger nodejs/ folder with AUTH_SECRET=... then Restart the app."
         : !databaseConnected
-          ? "DATABASE_URL için file:./prod.db kullanın ve npm run db:bootstrap çalıştırın."
+          ? "Kalıcı absolute DATABASE_URL kullanın ve npm run db:bootstrap çalıştırın."
         : undefined,
     },
     { status: ok ? 200 : 503 },
