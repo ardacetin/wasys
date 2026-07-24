@@ -4,6 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatDistanceToNow } from "date-fns";
 import { tr } from "date-fns/locale";
 import { Check, CheckCheck, Filter, LayoutTemplate, Mic, Search, Send, X } from "lucide-react";
+import {
+  filterTemplatesBySlashQuery,
+  findExactShortcutTemplate,
+} from "@/lib/template-shortcuts";
 import { cn, initials } from "@/lib/utils";
 
 function fillTemplate(
@@ -78,7 +82,15 @@ export default function InboxPage() {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [shortcutHighlight, setShortcutHighlight] = useState(0);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  const slashSuggestions = useMemo(
+    () => filterTemplatesBySlashQuery(templates, draft),
+    [templates, draft],
+  );
+  const showSlashSuggest =
+    !templatesOpen && draft.trim().startsWith("/") && slashSuggestions.length > 0;
 
   const loadConversations = useCallback(async () => {
     const params = new URLSearchParams();
@@ -156,6 +168,10 @@ export default function InboxPage() {
     }
   }
 
+  useEffect(() => {
+    setShortcutHighlight(0);
+  }, [draft, showSlashSuggest]);
+
   function insertTemplate(t: Template) {
     setDraft(fillTemplate(t.body, selected?.contact));
     setTemplatesOpen(false);
@@ -166,13 +182,9 @@ export default function InboxPage() {
     void sendMessage(fillTemplate(t.body, selected?.contact));
   }
 
-  /** Typing a template shortcut (e.g. /merhaba) and pressing Enter expands it. */
+  /** Tam kısayol (ör. /merhaba) → şablon metnini taslağa yazar. */
   function expandShortcut(): boolean {
-    const text = draft.trim();
-    if (!text.startsWith("/")) return false;
-    const t = templates.find(
-      (x) => x.shortcut && x.shortcut.toLowerCase() === text.toLowerCase(),
-    );
+    const t = findExactShortcutTemplate(templates, draft);
     if (!t) return false;
     setDraft(fillTemplate(t.body, selected?.contact));
     return true;
@@ -429,6 +441,44 @@ export default function InboxPage() {
                 </div>
               ) : null}
 
+              {showSlashSuggest ? (
+                <div
+                  role="listbox"
+                  aria-label="Şablon önerileri"
+                  className="absolute bottom-full left-3 right-3 z-10 mb-2 max-h-64 overflow-y-auto rounded-2xl border border-line bg-white p-1.5 shadow-lg"
+                >
+                  <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-ink-muted">
+                    Şablon önerileri · Enter veya tıkla
+                  </p>
+                  {slashSuggestions.map((t, i) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      role="option"
+                      aria-selected={i === shortcutHighlight}
+                      onMouseEnter={() => setShortcutHighlight(i)}
+                      onClick={() => insertTemplate(t)}
+                      className={cn(
+                        "flex w-full items-start gap-2 rounded-xl px-2 py-2 text-left",
+                        i === shortcutHighlight ? "bg-brand-soft" : "hover:bg-brand-soft/50",
+                      )}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="truncate text-sm font-semibold">{t.title}</span>
+                          {t.shortcut ? (
+                            <code className="shrink-0 text-[10px] text-brand">{t.shortcut}</code>
+                          ) : null}
+                        </div>
+                        <p className="mt-0.5 line-clamp-1 text-xs text-ink-muted">
+                          {fillTemplate(t.body, selected?.contact)}
+                        </p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+
               <div className="mb-2 flex flex-wrap gap-2">
                 <button
                   onClick={() => setTemplatesOpen((v) => !v)}
@@ -455,9 +505,47 @@ export default function InboxPage() {
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                   rows={2}
-                  placeholder="Mesaj yazın... (/kısayol + Enter şablonu açar)"
+                  placeholder="Mesaj yazın… / yazınca şablonlar otomatik çıkar"
                   className="min-h-[48px] flex-1 resize-none rounded-2xl border border-line bg-white px-3 py-2.5 text-sm outline-none ring-brand focus:ring-2"
                   onKeyDown={(e) => {
+                    if (showSlashSuggest) {
+                      if (e.key === "ArrowDown") {
+                        e.preventDefault();
+                        setShortcutHighlight((h) =>
+                          Math.min(h + 1, slashSuggestions.length - 1),
+                        );
+                        return;
+                      }
+                      if (e.key === "ArrowUp") {
+                        e.preventDefault();
+                        setShortcutHighlight((h) => Math.max(h - 1, 0));
+                        return;
+                      }
+                      if (e.key === "Escape") {
+                        e.preventDefault();
+                        setDraft("");
+                        return;
+                      }
+                      if (e.key === "Tab") {
+                        e.preventDefault();
+                        const pick =
+                          slashSuggestions[shortcutHighlight] ?? slashSuggestions[0];
+                        if (pick) insertTemplate(pick);
+                        return;
+                      }
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        const exact = findExactShortcutTemplate(templates, draft);
+                        if (exact) {
+                          setDraft(fillTemplate(exact.body, selected?.contact));
+                          return;
+                        }
+                        const pick =
+                          slashSuggestions[shortcutHighlight] ?? slashSuggestions[0];
+                        if (pick) insertTemplate(pick);
+                        return;
+                      }
+                    }
                     if (e.key === "Enter" && !e.shiftKey) {
                       e.preventDefault();
                       if (expandShortcut()) return;

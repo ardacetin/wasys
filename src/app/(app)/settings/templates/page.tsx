@@ -63,10 +63,12 @@ export default function TemplatesPage() {
       <div>
         <h1 className="font-[family-name:var(--font-display)] text-3xl">Hazır mesaj şablonları</h1>
         <p className="mt-1 text-sm text-ink-muted">
-          Sık kullanılan yanıtları gelen kutusundan tek tıkla gönderin.{" "}
+          Sık kullanılan yanıtları gelen kutusundan tek tıkla veya{" "}
+          <code className="rounded bg-brand-soft px-1">/</code> yazarak otomatik
+          öneriden seçin.{" "}
           <code className="rounded bg-brand-soft px-1">{"{{ad}}"}</code> ve{" "}
-          <code className="rounded bg-brand-soft px-1">{"{{telefon}}"}</code> yazarsanız
-          gönderirken kişinin adı ve telefonu otomatik yerleştirilir.
+          <code className="rounded bg-brand-soft px-1">{"{{telefon}}"}</code>{" "}
+          yazarsanız gönderirken kişinin adı ve telefonu otomatik yerleştirilir.
         </p>
       </div>
 
@@ -79,7 +81,7 @@ export default function TemplatesPage() {
         />
         <input
           name="shortcut"
-          placeholder="Kısayol (ör. /merhaba — sohbette yazıp Enter'a basınca şablon açılır)"
+          placeholder="Kısayol (ör. /merhaba — gelen kutuda / yazınca öneri çıkar)"
           className="w-full rounded-xl border border-line bg-white px-3 py-2 text-sm outline-none ring-brand focus:ring-2"
         />
         <textarea

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { normalizeShortcut } from "@/lib/template-shortcuts";
 
 const updateSchema = z.object({
   title: z.string().min(1).optional(),
@@ -31,9 +32,14 @@ export async function PATCH(
     return NextResponse.json({ error: "Geçersiz veri" }, { status: 400 });
   }
 
+  const data = { ...parsed.data };
+  if ("shortcut" in data) {
+    data.shortcut = normalizeShortcut(data.shortcut);
+  }
+
   const template = await prisma.messageTemplate.update({
     where: { id },
-    data: parsed.data,
+    data,
   });
   return NextResponse.json({ template });
 }

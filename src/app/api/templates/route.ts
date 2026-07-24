@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { normalizeShortcut } from "@/lib/template-shortcuts";
 
 export async function GET() {
   const session = await auth();
@@ -39,7 +40,9 @@ export async function POST(req: Request) {
   const template = await prisma.messageTemplate.create({
     data: {
       organizationId: session.user.organizationId,
-      ...parsed.data,
+      title: parsed.data.title.trim(),
+      body: parsed.data.body.trim(),
+      shortcut: normalizeShortcut(parsed.data.shortcut),
     },
   });
   return NextResponse.json({ template });
