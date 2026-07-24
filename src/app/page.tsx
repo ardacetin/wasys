@@ -138,12 +138,6 @@ export default function HomePage() {
                 Ekibime özel teklif al
                 <ArrowRight size={17} aria-hidden="true" />
               </a>
-              <Link
-                href="/giris"
-                className="inline-flex min-h-12 items-center rounded-full border border-line bg-white px-6 text-sm font-bold text-ink transition hover:border-brand"
-              >
-                Demo hesabına gir
-              </Link>
             </div>
             <div className="mt-8 flex flex-wrap gap-x-6 gap-y-3 text-sm text-ink-muted">
               {["Kurulum desteği", "Kapalı ve güvenli kayıt", "İhtiyaca özel fiyat"].map((item) => (
