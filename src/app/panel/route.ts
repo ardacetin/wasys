@@ -13,7 +13,7 @@ export async function GET(req: Request) {
     return NextResponse.redirect(publicUrl("/giris", req));
   }
   if (isPlatformAdmin(session.user.email)) {
-    return NextResponse.redirect(publicUrl("/admin/accounts", req));
+    return NextResponse.redirect(publicUrl("/admin", req));
   }
   return NextResponse.redirect(publicUrl("/inbox", req));
 }

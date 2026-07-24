@@ -21,26 +21,14 @@ type OrgUser = {
   createdAt: string;
 };
 
-type QuoteRequest = {
-  id: string;
-  fullName: string;
-  email: string;
-  phone: string;
-  userCount: number;
-  plan: string;
-  status: string;
-  createdAt: string;
-};
-
 const ROLE_LABELS: Record<string, string> = {
   OWNER: "Hesap sahibi",
-  ADMIN: "Yönetici",
+  ADMIN: "Yönetici / Süpervizör",
   AGENT: "Temsilci",
 };
 
 export default function PlatformAccountsPage() {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [quoteRequests, setQuoteRequests] = useState<QuoteRequest[]>([]);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [loading, setLoading] = useState(true);
@@ -55,18 +43,14 @@ export default function PlatformAccountsPage() {
   const [addingUser, setAddingUser] = useState(false);
 
   const load = useCallback(async () => {
-    const [res, quotesRes] = await Promise.all([
-      fetch("/api/admin/organizations", { cache: "no-store" }),
-      fetch("/api/admin/quote-requests", { cache: "no-store" }),
-    ]);
-    const [data, quotesData] = await Promise.all([res.json(), quotesRes.json()]);
+    const res = await fetch("/api/admin/organizations", { cache: "no-store" });
+    const data = await res.json();
     setLoading(false);
     if (!res.ok) {
       setError(data.error ?? "Hesaplar yüklenemedi");
       return;
     }
     setOrganizations(data.organizations ?? []);
-    if (quotesRes.ok) setQuoteRequests(quotesData.quoteRequests ?? []);
   }, []);
 
   useEffect(() => {
@@ -119,6 +103,7 @@ export default function PlatformAccountsPage() {
           ownerEmail: fields.get("ownerEmail"),
           temporaryPassword: fields.get("temporaryPassword"),
           plan: fields.get("plan"),
+          maxUsers: Number(fields.get("maxUsers")),
         }),
       });
       const data = await res.json();
@@ -292,10 +277,10 @@ export default function PlatformAccountsPage() {
           Platform yönetimi
         </p>
         <h1 className="mt-2 font-[family-name:var(--font-display)] text-3xl">
-          SaaS müşteri hesapları
+          Müşteri hesapları
         </h1>
         <p className="mt-1 text-sm text-ink-muted">
-          Dış kayıt kapalıdır. Organizasyonları ve altlarındaki kullanıcıları buradan yönetin.
+          Yeni müşteri açın, kullanıcı kotasını belirleyin, alt kullanıcıları yönetin.
         </p>
       </div>
 
@@ -322,6 +307,24 @@ export default function PlatformAccountsPage() {
             <option value="BASIC">Basic</option>
             <option value="PRO">Pro</option>
           </select>
+        </label>
+        <label className="text-sm md:col-span-2">
+          <span className="mb-1 block font-medium">
+            Kullanıcı kotası (agent + süpervizör + hesap sahibi)
+          </span>
+          <input
+            name="maxUsers"
+            type="number"
+            min={1}
+            max={500}
+            defaultValue={5}
+            required
+            className="w-full rounded-xl border border-line bg-white px-3 py-2"
+          />
+          <span className="mt-1 block text-xs text-ink-muted">
+            Bu müşteri hesabına eklenebilecek toplam kullanıcı sayısı. Örn. 10
+            seçerseniz 1 hesap sahibi + 9 temsilci/yönetici açılabilir.
+          </span>
         </label>
         <label className="text-sm">
           <span className="mb-1 block font-medium">Owner adı</span>
@@ -574,52 +577,6 @@ export default function PlatformAccountsPage() {
             ) : null}
           </div>
         )}
-      </section>
-
-      <section className="overflow-hidden rounded-2xl border border-line bg-bg-elevated">
-        <div className="border-b border-line p-4">
-          <h2 className="font-semibold">Teklif talepleri</h2>
-          <p className="mt-1 text-xs text-ink-muted">Ana sayfadaki formdan gelen son 100 talep</p>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-white/60 text-xs uppercase tracking-wide text-ink-muted">
-              <tr>
-                <th className="px-4 py-3">İletişim</th>
-                <th className="px-4 py-3">Paket</th>
-                <th className="px-4 py-3">Kullanıcı</th>
-                <th className="px-4 py-3">Tarih</th>
-              </tr>
-            </thead>
-            <tbody>
-              {quoteRequests.map((quote) => (
-                <tr key={quote.id} className="border-t border-line">
-                  <td className="px-4 py-3">
-                    <div className="font-medium">{quote.fullName}</div>
-                    <a className="block text-xs text-brand" href={`mailto:${quote.email}`}>
-                      {quote.email}
-                    </a>
-                    <a className="block text-xs text-ink-muted" href={`tel:${quote.phone}`}>
-                      {quote.phone}
-                    </a>
-                  </td>
-                  <td className="px-4 py-3">{quote.plan}</td>
-                  <td className="px-4 py-3">{quote.userCount}</td>
-                  <td className="px-4 py-3 text-xs text-ink-muted">
-                    {new Date(quote.createdAt).toLocaleString("tr-TR")}
-                  </td>
-                </tr>
-              ))}
-              {!quoteRequests.length ? (
-                <tr>
-                  <td className="px-4 py-6 text-center text-ink-muted" colSpan={4}>
-                    Henüz teklif talebi yok.
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
       </section>
     </div>
   );

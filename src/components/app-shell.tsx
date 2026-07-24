@@ -1,15 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect } from "react";
 import { signOut } from "next-auth/react";
 import {
   BarChart3,
   BookUser,
   Building2,
+  ClipboardList,
   GitBranch,
   Inbox,
   KeyRound,
+  LayoutDashboard,
   MessageSquareText,
   Radio,
   Settings,
@@ -18,7 +21,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const links = [
+const tenantLinks = [
   { href: "/inbox", label: "Gelen kutusu", icon: Inbox },
   { href: "/crm", label: "CRM", icon: BookUser },
   { href: "/reports", label: "Raporlar", icon: BarChart3 },
@@ -29,6 +32,13 @@ const links = [
   { href: "/settings/team", label: "Ekip", icon: Users },
   { href: "/settings/api", label: "API", icon: KeyRound },
   { href: "/settings/plan", label: "Paket", icon: Settings },
+];
+
+const platformLinks = [
+  { href: "/admin", label: "Özet", icon: LayoutDashboard },
+  { href: "/admin/accounts", label: "Müşteriler", icon: Building2 },
+  { href: "/admin/users", label: "Kullanıcılar", icon: Users },
+  { href: "/admin/quote-requests", label: "Talepler", icon: ClipboardList },
 ];
 
 export function AppShell({
@@ -45,31 +55,44 @@ export function AppShell({
   isPlatformAdmin: boolean;
 }) {
   const pathname = usePathname();
-  const visibleLinks = isPlatformAdmin
-    ? [
-        { href: "/admin/accounts", label: "Müşteri hesapları", icon: Building2 },
-        ...links,
-      ]
-    : links;
+  const router = useRouter();
+  const visibleLinks = isPlatformAdmin ? platformLinks : tenantLinks;
+
+  // Süper admin yalnızca SaaS paneline erişir; müşteri ekranlarına düşmesin.
+  useEffect(() => {
+    if (!isPlatformAdmin) return;
+    if (!pathname.startsWith("/admin")) {
+      router.replace("/admin");
+    }
+  }, [isPlatformAdmin, pathname, router]);
 
   return (
     <div className="flex min-h-screen">
       <aside className="hidden w-64 shrink-0 border-r border-line bg-panel text-panel-ink md:flex md:flex-col">
         <div className="border-b border-white/10 px-5 py-5">
-          <div className="font-[family-name:var(--font-display)] text-2xl tracking-tight">WASYS</div>
-          <div className="mt-1 truncate text-xs text-white/55">{orgName}</div>
+          <div className="font-[family-name:var(--font-display)] text-2xl tracking-tight">
+            WASYS
+          </div>
+          <div className="mt-1 truncate text-xs text-white/55">
+            {isPlatformAdmin ? "Platform yönetimi" : orgName}
+          </div>
         </div>
         <nav className="flex flex-1 flex-col gap-1 p-3">
           {visibleLinks.map((link) => {
             const Icon = link.icon;
-            const active = pathname.startsWith(link.href);
+            const active =
+              link.href === "/admin"
+                ? pathname === "/admin"
+                : pathname.startsWith(link.href);
             return (
               <Link
                 key={link.href}
                 href={link.href}
                 className={cn(
                   "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition",
-                  active ? "bg-brand text-white" : "text-white/70 hover:bg-white/5 hover:text-white",
+                  active
+                    ? "bg-brand text-white"
+                    : "text-white/70 hover:bg-white/5 hover:text-white",
                 )}
               >
                 <Icon size={18} />
@@ -80,7 +103,9 @@ export function AppShell({
         </nav>
         <div className="border-t border-white/10 p-4">
           <div className="text-sm font-medium">{userName}</div>
-          <div className="mt-0.5 text-xs text-white/50">{plan} paket</div>
+          <div className="mt-0.5 text-xs text-white/50">
+            {isPlatformAdmin ? "Süper yönetici" : `${plan} paket`}
+          </div>
           <button
             onClick={() => signOut({ callbackUrl: "/" })}
             className="mt-3 text-xs text-white/60 hover:text-white"
@@ -92,10 +117,16 @@ export function AppShell({
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center justify-between border-b border-line bg-bg-elevated/80 px-4 py-3 backdrop-blur md:hidden">
-          <div className="font-[family-name:var(--font-display)] text-xl text-brand-deep">WASYS</div>
+          <div className="font-[family-name:var(--font-display)] text-xl text-brand-deep">
+            WASYS
+          </div>
           <div className="flex gap-2 overflow-x-auto text-xs">
             {visibleLinks.map((l) => (
-              <Link key={l.href} href={l.href} className="rounded-full border border-line px-3 py-1">
+              <Link
+                key={l.href}
+                href={l.href}
+                className="rounded-full border border-line px-3 py-1"
+              >
                 {l.label}
               </Link>
             ))}
