@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
+import { publicUrl } from "@/lib/public-url";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
-  return NextResponse.redirect(new URL("/giris", req.url), 307);
+  return NextResponse.redirect(publicUrl("/giris", req), 307);
 }
 
 export async function POST() {

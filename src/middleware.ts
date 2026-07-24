@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { publicUrl } from "@/lib/public-url";
 
 /**
  * Lightweight cookie check only — do NOT call Auth.js here.
@@ -21,7 +22,7 @@ export function middleware(req: NextRequest) {
 
   // Bypass broken CDN-cached RSC on old App Router /login
   if (path === "/login" || path === "/register" || path === "/kayit") {
-    return NextResponse.redirect(new URL("/giris" + req.nextUrl.search, req.url), 307);
+    return NextResponse.redirect(publicUrl("/giris" + req.nextUrl.search, req), 307);
   }
 
   const isAuthPage = path === "/giris";
@@ -32,11 +33,11 @@ export function middleware(req: NextRequest) {
     path.startsWith("/reports");
 
   if (isProtected && !isLoggedIn) {
-    return NextResponse.redirect(new URL("/giris", req.url));
+    return NextResponse.redirect(publicUrl("/giris", req));
   }
 
   if (isAuthPage && isLoggedIn) {
-    return NextResponse.redirect(new URL("/panel", req.url));
+    return NextResponse.redirect(publicUrl("/panel", req));
   }
 
   return NextResponse.next();
