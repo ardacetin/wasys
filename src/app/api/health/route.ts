@@ -102,7 +102,9 @@ export async function GET() {
       hint: !hasAuthSecret
         ? "Create a .env file in the Hostinger nodejs/ folder with AUTH_SECRET=... then Restart the app."
         : !databaseConnected
-          ? "SQLite Error 14: Entry file=server.js yapın; DATABASE_URL=file:/home/u781807728/domains/wasys.pro/nodejs/data/prod.db; nodejs/data klasörünü oluşturun; Redeploy. health.database.sqlite alanına bakın."
+          ? databaseError?.code === "P2021"
+            ? "DB dosyası var ama tablolar yok. Redeploy / Restart edin (otomatik prisma db push çalışacak). Entry file=server.js."
+            : "SQLite açılamıyor. DATABASE_URL=file:/home/u781807728/domains/wasys.pro/nodejs/data/prod.db; Entry file=server.js; Redeploy. health.database.sqlite alanına bakın."
         : undefined,
     },
     {
