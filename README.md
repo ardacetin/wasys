@@ -1,36 +1,72 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# WASYS
 
-## Getting Started
+WhatsApp CRM — ortak gelen kutusu, QR ile WhatsApp bağlantısı (Baileys) ve Meta Cloud API desteği.
 
-First, run the development server:
+## Özellikler (Basic MVP)
+
+- Ortak gelen kutusu, etiketleme, filtreleme
+- Çok kullanıcılı sohbet / atama
+- Hazır mesaj şablonları ve sohbet butonları
+- Okundu / iletildi göstergeleri
+- WhatsApp **QR** bağlantısı (öncelikli)
+- WhatsApp **Cloud API** (ikincil)
+- Basic / Pro paket kapıları
+- Ekip yönetimi (Basic: 5 kullanıcı)
+
+## Kurulum
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+cp .env.example .env
+npm run db:push
+npm run db:seed
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+İki süreç çalıştırın:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+# terminal 1
+npm run dev
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+# terminal 2
+npm run dev:gateway
+```
 
-## Learn More
+- Web: http://localhost:3000
+- Gateway: http://localhost:4001
 
-To learn more about Next.js, take a look at the following resources:
+### Demo hesap
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- `demo@wasys.app` / `demo1234`
+- `agent@wasys.app` / `demo1234`
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## WhatsApp QR
 
-## Deploy on Vercel
+1. Giriş yapın → **Kanallar**
+2. **QR ile bağlan**
+3. Telefonda WhatsApp → Bağlı Cihazlar → kodu tarayın
+4. Bağlantı sonrası mesajlar gelen kutusuna düşer
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Gateway `GATEWAY_SECRET` ile web uygulamasına webhook atar (`/api/webhooks/wa-gateway`).
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Cloud API
+
+Kanallar sayfasından Phone Number ID + token kaydedin. Meta webhook URL:
+
+`https://<host>/api/webhooks/meta`
+
+Verify token: `.env` içindeki `META_VERIFY_TOKEN`.
+
+## Mimari
+
+```
+Next.js (UI + API)  ←→  SQLite/Prisma
+        ↑ webhook
+Baileys Gateway (:4001)  ← QR / WhatsApp Web
+```
+
+## Sonraki fazlar (Pro)
+
+- Intent AI, Zoho/Shopify, çağrı merkezi
+- Mobil uygulama (WapCRM)
+- Instagram DM

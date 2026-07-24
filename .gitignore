@@ -39,3 +39,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+/src/generated/prisma
+/prisma/*.db
+/prisma/*.db-journal
+/gateway-auth
+/public/uploads/**
+!/public/uploads/.gitkeep
+.env
+!.env.example

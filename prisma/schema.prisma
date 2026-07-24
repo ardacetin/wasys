@@ -1,0 +1,255 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum Plan {
+  BASIC
+  PRO
+}
+
+enum UserRole {
+  OWNER
+  ADMIN
+  AGENT
+}
+
+enum ChannelType {
+  WHATSAPP_QR
+  WHATSAPP_CLOUD
+  INSTAGRAM
+}
+
+enum ChannelStatus {
+  DISCONNECTED
+  CONNECTING
+  QR_PENDING
+  CONNECTED
+  ERROR
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  AUDIO
+  VIDEO
+  DOCUMENT
+  TEMPLATE
+  SYSTEM
+}
+
+enum MessageStatus {
+  PENDING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  plan      Plan     @default(BASIC)
+  maxUsers  Int      @default(5)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users         User[]
+  channels      Channel[]
+  contacts      Contact[]
+  conversations Conversation[]
+  tags          Tag[]
+  templates     MessageTemplate[]
+  quickButtons  QuickButton[]
+}
+
+model User {
+  id             String    @id @default(cuid())
+  email          String    @unique
+  name           String
+  passwordHash   String
+  role           UserRole  @default(AGENT)
+  phone          String?
+  avatarUrl      String?
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  assignedConversations Conversation[] @relation("AssignedAgent")
+  sentMessages          Message[]       @relation("SentBy")
+  accounts              Account[]
+  sessions              Session[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Channel {
+  id             String        @id @default(cuid())
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  type           ChannelType
+  status         ChannelStatus @default(DISCONNECTED)
+  phoneNumber    String?
+  sessionId      String?       @unique
+  qrData         String?
+  metaPhoneId    String?
+  metaToken      String?
+  metaWabaId     String?
+  lastError      String?
+  connectedAt    DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  conversations Conversation[]
+}
+
+model Contact {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String?
+  phone          String
+  email          String?
+  avatarUrl      String?
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  conversations Conversation[]
+
+  @@unique([organizationId, phone])
+  @@index([organizationId, name])
+}
+
+model Conversation {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  channelId      String
+  channel        Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  contactId      String
+  contact        Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  assignedToId   String?
+  assignedTo     User?    @relation("AssignedAgent", fields: [assignedToId], references: [id])
+  subject        String?
+  lastMessageAt  DateTime @default(now())
+  lastMessagePreview String?
+  unreadCount    Int      @default(0)
+  isArchived     Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  messages Message[]
+  tags     ConversationTag[]
+
+  @@unique([channelId, contactId])
+  @@index([organizationId, lastMessageAt])
+  @@index([assignedToId])
+}
+
+model Message {
+  id             String           @id @default(cuid())
+  conversationId String
+  conversation   Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  direction      MessageDirection
+  type           MessageType      @default(TEXT)
+  status         MessageStatus    @default(SENT)
+  body           String?
+  mediaUrl       String?
+  mediaMimeType  String?
+  externalId     String?
+  sentById       String?
+  sentBy         User?            @relation("SentBy", fields: [sentById], references: [id])
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@index([conversationId, createdAt])
+  @@index([externalId])
+}
+
+model Tag {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  color          String   @default("#0F766E")
+  createdAt      DateTime @default(now())
+
+  conversations ConversationTag[]
+
+  @@unique([organizationId, name])
+}
+
+model ConversationTag {
+  conversationId String
+  tagId          String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  tag            Tag          @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([conversationId, tagId])
+}
+
+model MessageTemplate {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  title          String
+  body           String
+  shortcut       String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model QuickButton {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  label          String
+  body           String
+  sortOrder      Int      @default(0)
+  createdAt      DateTime @default(now())
+}
