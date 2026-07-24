@@ -32,15 +32,47 @@ cd ~/domains/wasys.pro/nodejs
 npm run db:bootstrap
 ```
 
-`.env` içindeki SQLite yolu deploy klasörünün dışında, kalıcı bir absolute path olmalı:
+`.env` / panelde SQLite yolu **yazılabilir** absolute path olmalı:
 
 ```env
-DATABASE_URL=file:/home/u781807728/domains/wasys.pro/data/prod.db
+DATABASE_URL=file:/home/u781807728/domains/wasys.pro/nodejs/data/prod.db
 ```
 
-Hostinger deploy sırasında `nodejs/` klasörünü yeniden oluşturabilir. DB bu klasörde
-olursa silinebilir veya runtime tarafından bulunamayabilir. `prepare-db.mjs`, kalıcı
-`data/` klasörünü build/start öncesi otomatik oluşturur.
+**Error 14 / Unable to open the database file** = klasör yok veya yazma izni yok.
+Hostinger Node çoğu zaman `domains/wasys.pro/data` (nodejs dışı) yoluna yazamaz.
+Bu yüzden varsayılan yol `nodejs/data/prod.db`.
+
+Kontrol listesi:
+1. File Manager → `nodejs/data` klasörünü oluştur (boş olabilir)
+2. `DATABASE_URL` yukarıdaki gibi olsun (panel **ve** `nodejs/.env`)
+3. Node.js **Start command** = `npm start` (`next start` değil)
+4. Redeploy / Restart
+5. https://wasys.pro/api/health → `DATABASE_CONNECTED: true`
+
+### SSH’te `npm: command not found`
+
+Hostinger SSH PATH’inde npm yok. Önce Node sürümünü bul:
+
+```bash
+ls /opt/alt/alt-nodejs*/root/usr/bin/npm
+```
+
+Sonra (örnek Node 22):
+
+```bash
+export PATH="/opt/alt/alt-nodejs22/root/usr/bin:$PATH"
+cd ~/domains/wasys.pro/nodejs
+mkdir -p data
+node prisma/run-production.mjs bootstrap
+```
+
+`npx` kullanma — Hostinger’da çoğu zaman yoktur. Yerel binary:
+`./node_modules/.bin/prisma`
+
+En kolayı yine de: File Manager’da `data` + doğru `DATABASE_URL`, sonra panelden **Redeploy**.
+
+`prepare-db.mjs` klasörü oluşturur; yazamazsa otomatik `nodejs/data/prod.db`’ye düşer.
+Start/build aynı process env ile `prisma db push` + bootstrap çalıştırır.
 
 `db:bootstrap` mevcut müşteri verilerini silmez; yalnızca sunucu environment
 variable’larında tanımlanan platform yöneticisini idempotent olarak hazırlar.

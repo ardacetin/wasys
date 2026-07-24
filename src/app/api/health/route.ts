@@ -51,7 +51,7 @@ export async function GET() {
       hint: !hasAuthSecret
         ? "Create a .env file in the Hostinger nodejs/ folder with AUTH_SECRET=... then Restart the app."
         : !databaseConnected
-          ? "Kalıcı absolute DATABASE_URL kullanın ve npm run db:bootstrap çalıştırın."
+          ? "SQLite açılamıyor (Error 14). DATABASE_URL=file:/home/u781807728/domains/wasys.pro/nodejs/data/prod.db yapın, nodejs/data klasörünü oluşturun, Start command=npm start, sonra Redeploy."
         : undefined,
     },
     { status: ok ? 200 : 503 },
