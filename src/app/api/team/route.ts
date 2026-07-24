@@ -24,6 +24,7 @@ export async function GET() {
     users,
     plan: org?.plan,
     maxUsers: org ? PLAN_LIMITS[org.plan].maxUsers : 5,
+    me: { id: session.user.id, role: session.user.role },
   });
 }
 
@@ -57,7 +58,14 @@ export async function POST(req: Request) {
     );
   }
 
-  const data = schema.parse(await req.json());
+  const parsed = schema.safeParse(await req.json());
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Ad (en az 2 karakter), geçerli e-posta ve şifre (en az 6 karakter) zorunludur" },
+      { status: 400 },
+    );
+  }
+  const data = parsed.data;
   const email = data.email.toLowerCase();
   const exists = await prisma.user.findUnique({ where: { email } });
   if (exists) {
