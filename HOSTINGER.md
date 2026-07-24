@@ -45,9 +45,11 @@ Bu yüzden varsayılan yol `nodejs/data/prod.db`.
 Kontrol listesi:
 1. File Manager → `nodejs/data` klasörünü oluştur (boş olabilir)
 2. `DATABASE_URL` yukarıdaki gibi olsun (panel **ve** `nodejs/.env`)
-3. Node.js **Start command** = `npm start` (`next start` değil)
-4. Redeploy / Restart
-5. https://wasys.pro/api/health → `DATABASE_CONNECTED: true`
+3. hPanel Node.js → **Application startup file / Entry file** = `server.js`
+   (Hostinger’da `npm start` alanı olmayabilir — entry file kullan)
+4. Build command varsa: `npm run build`
+5. Redeploy / Restart
+6. https://wasys.pro/api/health → `DATABASE_CONNECTED: true`
 
 ### SSH’te `npm: command not found`
 
