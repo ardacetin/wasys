@@ -3,7 +3,6 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { isPlatformAdmin, platformAdminEmails } from "@/lib/platform-admin";
-import { PLAN_LIMITS } from "@/lib/plans";
 
 async function requirePlatformAdmin() {
   const session = await auth();
@@ -13,7 +12,6 @@ async function requirePlatformAdmin() {
 
 const updateSchema = z.object({
   name: z.string().trim().min(2).max(80).optional(),
-  plan: z.enum(["BASIC", "PRO"]).optional(),
   maxUsers: z.number().int().min(1).max(500).optional(),
 });
 
@@ -32,17 +30,14 @@ export async function PATCH(
   if (!parsed.success) {
     return NextResponse.json({ error: "Geçersiz veri" }, { status: 400 });
   }
-  const { name, plan, maxUsers } = parsed.data;
+  const { name, maxUsers } = parsed.data;
 
   const organization = await prisma.organization.update({
     where: { id },
     data: {
       ...(name ? { name } : {}),
-      ...(plan
-        ? { plan, maxUsers: maxUsers ?? PLAN_LIMITS[plan].maxUsers }
-        : maxUsers
-          ? { maxUsers }
-          : {}),
+      ...(maxUsers ? { maxUsers } : {}),
+      plan: "STANDARD",
     },
     select: { id: true, name: true, slug: true, plan: true, maxUsers: true },
   });

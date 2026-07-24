@@ -1,18 +1,13 @@
 import { NextResponse } from "next/server";
-import type { Plan } from "@prisma/client";
-import { hasFeature, type FeatureKey } from "@/lib/plans";
 
-export function featureDenied(feature: FeatureKey) {
+/** Kaldırılan Pro özelliği — API erişimi artık sunulmuyor. */
+export function featureDenied(feature: string) {
   return NextResponse.json(
     {
-      error: `Bu özellik Pro paket gerektirir (${feature})`,
-      upgradeRequired: true,
+      error: `Bu özellik artık sunulmuyor (${feature})`,
+      unavailable: true,
       feature,
     },
-    { status: 403 },
+    { status: 410 },
   );
-}
-
-export function assertFeature(plan: Plan, feature: FeatureKey) {
-  return hasFeature(plan, feature);
 }

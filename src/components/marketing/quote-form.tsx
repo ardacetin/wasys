@@ -3,10 +3,7 @@
 import { FormEvent, useState } from "react";
 import { CheckCircle2, Loader2, Send } from "lucide-react";
 
-type Plan = "BASIC" | "PRO" | "KARARSIZ";
-
-export function QuoteForm({ defaultPlan = "PRO" }: { defaultPlan?: Plan }) {
-  const [selectedPlan, setSelectedPlan] = useState<Plan>(defaultPlan);
+export function QuoteForm() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -27,7 +24,6 @@ export function QuoteForm({ defaultPlan = "PRO" }: { defaultPlan?: Plan }) {
         email: fields.get("email"),
         phone: fields.get("phone"),
         userCount: fields.get("userCount"),
-        plan: selectedPlan,
         website: fields.get("website"),
       }),
     });
@@ -44,7 +40,6 @@ export function QuoteForm({ defaultPlan = "PRO" }: { defaultPlan?: Plan }) {
 
     setSuccess(data.message);
     form.reset();
-    setSelectedPlan(defaultPlan);
   }
 
   if (success) {
@@ -80,46 +75,15 @@ export function QuoteForm({ defaultPlan = "PRO" }: { defaultPlan?: Plan }) {
       <div className="mb-6">
         <p className="text-xs font-bold uppercase tracking-[0.18em] text-brand">Teklif al</p>
         <h3 className="mt-2 font-[family-name:var(--font-display)] text-2xl text-ink">
-          Ekibinize uygun paketi birlikte belirleyelim
+          Kullanıcı sayınıza göre fiyatlandırma
         </h3>
         <p className="mt-2 text-sm leading-6 text-ink-muted">
-          Bilgilerinizi bırakın, size özel kapsam ve fiyatlandırmayla dönüş yapalım.
+          Tek paket, tüm özellikler dahil. Kaç kişinin kullanacağını yazın; size özel
+          teklif hazırlayalım.
         </p>
       </div>
 
-      <fieldset>
-        <legend className="mb-2 text-sm font-semibold text-ink">İlgilendiğiniz paket</legend>
-        <div className="grid grid-cols-3 gap-2">
-          {(
-            [
-              ["BASIC", "Basic"],
-              ["PRO", "Pro"],
-              ["KARARSIZ", "Kararsızım"],
-            ] as const
-          ).map(([value, label]) => (
-            <label
-              key={value}
-              className={`flex min-h-11 cursor-pointer items-center justify-center rounded-xl border px-2 text-center text-xs font-semibold transition sm:text-sm ${
-                selectedPlan === value
-                  ? "border-brand bg-brand text-white"
-                  : "border-line bg-bg-elevated text-ink hover:border-brand"
-              }`}
-            >
-              <input
-                type="radio"
-                name="plan"
-                value={value}
-                checked={selectedPlan === value}
-                onChange={() => setSelectedPlan(value)}
-                className="sr-only"
-              />
-              {label}
-            </label>
-          ))}
-        </div>
-      </fieldset>
-
-      <div className="mt-5 grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-2">
         <label className="text-sm font-semibold text-ink sm:col-span-2">
           Ad soyad
           <input
@@ -166,6 +130,9 @@ export function QuoteForm({ defaultPlan = "PRO" }: { defaultPlan?: Plan }) {
             defaultValue={5}
             className="mt-1.5 min-h-12 w-full rounded-xl border border-line bg-white px-3.5 font-normal outline-none transition focus:border-brand focus:ring-4 focus:ring-brand/10"
           />
+          <span className="mt-1.5 block text-xs font-normal text-ink-muted">
+            Fiyatlandırmayı belirleyen tek ölçü kullanıcı sayısıdır.
+          </span>
         </label>
       </div>
 

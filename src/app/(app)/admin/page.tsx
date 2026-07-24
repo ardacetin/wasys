@@ -113,7 +113,7 @@ export default function AdminOverviewPage() {
                 <div>
                   <div className="font-medium">{org.name}</div>
                   <div className="text-xs text-ink-muted">
-                    {org.plan} · {org._count.users}/{org.maxUsers} kullanıcı
+                    {org._count.users}/{org.maxUsers} kullanıcı
                   </div>
                 </div>
                 <div className="text-xs text-ink-muted">

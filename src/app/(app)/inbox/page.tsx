@@ -46,12 +46,6 @@ type Message = {
 type Template = { id: string; title: string; body: string; shortcut: string | null };
 type QuickButton = { id: string; label: string; body: string };
 type TeamUser = { id: string; name: string };
-type IntentSuggestion = {
-  intent: string;
-  confidence: number;
-  summary: string | null;
-  suggestions: string[];
-};
 
 function StatusTicks({ status }: { status: string }) {
   if (status === "READ") return <CheckCheck size={14} className="text-sky-500" />;
@@ -73,9 +67,6 @@ export default function InboxPage() {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [buttons, setButtons] = useState<QuickButton[]>([]);
   const [team, setTeam] = useState<TeamUser[]>([]);
-  const [intent, setIntent] = useState<IntentSuggestion | null>(null);
-  const [intentError, setIntentError] = useState("");
-  const [intentLoading, setIntentLoading] = useState(false);
   const [q, setQ] = useState("");
   const [tagId, setTagId] = useState("");
   const [assigned, setAssigned] = useState("");
@@ -188,41 +179,6 @@ export default function InboxPage() {
     if (!t) return false;
     setDraft(fillTemplate(t.body, selected?.contact));
     return true;
-  }
-
-  useEffect(() => {
-    if (!selectedId) {
-      setIntent(null);
-      setIntentError("");
-      return;
-    }
-    void (async () => {
-      const res = await fetch(`/api/conversations/${selectedId}/intent`);
-      const data = await res.json();
-      if (res.status === 403) {
-        setIntent(null);
-        setIntentError("Intent AI Pro paket gerektirir");
-        return;
-      }
-      setIntentError("");
-      setIntent(data.suggestion ?? null);
-    })();
-  }, [selectedId]);
-
-  async function runIntent() {
-    if (!selectedId) return;
-    setIntentLoading(true);
-    const res = await fetch(`/api/conversations/${selectedId}/intent`, { method: "POST" });
-    const data = await res.json();
-    setIntentLoading(false);
-    if (res.status === 403) {
-      setIntentError(data.error ?? "Pro paket gerekli");
-      return;
-    }
-    if (data.suggestion) {
-      setIntent(data.suggestion);
-      setIntentError("");
-    }
   }
 
   async function assignTo(userId: string) {
@@ -624,42 +580,6 @@ export default function InboxPage() {
                   );
                 })}
               </div>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between gap-2">
-                <div className="text-xs uppercase tracking-wide text-ink-muted">Intent AI</div>
-                <button
-                  onClick={() => void runIntent()}
-                  disabled={intentLoading}
-                  className="rounded-lg border border-line px-2 py-1 text-[11px] font-medium hover:bg-brand-soft disabled:opacity-50"
-                >
-                  {intentLoading ? "…" : "Analiz et"}
-                </button>
-              </div>
-              {intentError ? (
-                <p className="mt-2 text-xs text-ink-muted">{intentError}</p>
-              ) : intent ? (
-                <div className="mt-2 space-y-2 rounded-xl border border-line bg-white p-3">
-                  <div className="font-semibold">{intent.summary ?? intent.intent}</div>
-                  <div className="text-[11px] text-ink-muted">
-                    Güven: {Math.round(intent.confidence * 100)}%
-                  </div>
-                  <div className="space-y-1">
-                    {intent.suggestions.map((s) => (
-                      <button
-                        key={s}
-                        onClick={() => setDraft(s)}
-                        className="block w-full rounded-lg border border-line px-2 py-1.5 text-left text-xs hover:bg-brand-soft"
-                      >
-                        {s}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <p className="mt-2 text-xs text-ink-muted">Henüz analiz yok.</p>
-              )}
             </div>
           </div>
         ) : (

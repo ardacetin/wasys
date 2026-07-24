@@ -6,7 +6,7 @@ type Organization = {
   id: string;
   name: string;
   slug: string;
-  plan: "BASIC" | "PRO";
+  plan: string;
   maxUsers: number;
   createdAt: string;
   users: { name: string; email: string }[];
@@ -102,7 +102,6 @@ export default function PlatformAccountsPage() {
           ownerName: fields.get("ownerName"),
           ownerEmail: fields.get("ownerEmail"),
           temporaryPassword: fields.get("temporaryPassword"),
-          plan: fields.get("plan"),
           maxUsers: Number(fields.get("maxUsers")),
         }),
       });
@@ -117,22 +116,6 @@ export default function PlatformAccountsPage() {
     } finally {
       setSaving(false);
     }
-  }
-
-  async function changePlan(org: Organization, plan: string) {
-    if (plan === org.plan) return;
-    setDetailError("");
-    const res = await fetch(`/api/admin/organizations/${org.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ plan }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setDetailError(data.error ?? "Paket değiştirilemedi");
-      return;
-    }
-    await load();
   }
 
   async function changeMaxUsers(org: Organization, event: FormEvent<HTMLFormElement>) {
@@ -297,17 +280,6 @@ export default function PlatformAccountsPage() {
             className="w-full rounded-xl border border-line bg-white px-3 py-2"
           />
         </label>
-        <label className="text-sm">
-          <span className="mb-1 block font-medium">Paket</span>
-          <select
-            name="plan"
-            defaultValue="BASIC"
-            className="w-full rounded-xl border border-line bg-white px-3 py-2"
-          >
-            <option value="BASIC">Basic</option>
-            <option value="PRO">Pro</option>
-          </select>
-        </label>
         <label className="text-sm md:col-span-2">
           <span className="mb-1 block font-medium">
             Kullanıcı kotası (agent + süpervizör + hesap sahibi)
@@ -322,8 +294,8 @@ export default function PlatformAccountsPage() {
             className="w-full rounded-xl border border-line bg-white px-3 py-2"
           />
           <span className="mt-1 block text-xs text-ink-muted">
-            Bu müşteri hesabına eklenebilecek toplam kullanıcı sayısı. Örn. 10
-            seçerseniz 1 hesap sahibi + 9 temsilci/yönetici açılabilir.
+            Tek paket; fiyatlandırma bu kotaya göre yapılır. Örn. 10 seçerseniz 1
+            hesap sahibi + 9 temsilci/yönetici açılabilir.
           </span>
         </label>
         <label className="text-sm">
@@ -395,7 +367,7 @@ export default function PlatformAccountsPage() {
                     </div>
                     <div className="text-xs">
                       <span className="rounded-full bg-brand/10 px-2 py-0.5 font-semibold text-brand">
-                        {org.plan}
+                        WASYS
                       </span>
                     </div>
                     <div className="text-xs text-ink-muted">
@@ -409,22 +381,11 @@ export default function PlatformAccountsPage() {
                   {open ? (
                     <div className="space-y-4 border-t border-line bg-white/40 p-4">
                       <div className="flex flex-wrap items-center gap-3">
-                        <label className="flex items-center gap-2 text-sm">
-                          <span className="font-medium">Paket:</span>
-                          <select
-                            value={org.plan}
-                            onChange={(e) => void changePlan(org, e.target.value)}
-                            className="rounded-lg border border-line bg-white px-2 py-1 text-sm"
-                          >
-                            <option value="BASIC">Basic</option>
-                            <option value="PRO">Pro</option>
-                          </select>
-                        </label>
                         <form
                           onSubmit={(e) => void changeMaxUsers(org, e)}
                           className="flex items-center gap-2 text-sm"
                         >
-                          <span className="font-medium">Kullanıcı limiti:</span>
+                          <span className="font-medium">Kullanıcı kotası:</span>
                           <input
                             key={`${org.id}-${org.maxUsers}`}
                             name="maxUsers"
@@ -450,8 +411,7 @@ export default function PlatformAccountsPage() {
                         </button>
                       </div>
                       <p className="text-xs text-ink-muted">
-                        Paket değiştirildiğinde kullanıcı limiti paketin varsayılanına döner;
-                        gerekiyorsa sonrasında özel limiti tekrar kaydedin.
+                        Tek paket. Ücretlendirme yalnızca kullanıcı kotasına göre yapılır.
                       </p>
 
                       <div className="overflow-hidden rounded-xl border border-line bg-white">

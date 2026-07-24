@@ -7,11 +7,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum Plan {
-  BASIC
-  PRO
-}
-
 enum UserRole {
   OWNER
   ADMIN
@@ -73,7 +68,8 @@ model Organization {
   id        String   @id @default(cuid())
   name      String
   slug      String   @unique
-  plan      Plan     @default(BASIC)
+  // Eski Basic/Pro kaldırıldı; tek paket. Faturalama boyutu: maxUsers.
+  plan      String   @default("STANDARD")
   maxUsers  Int      @default(5)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

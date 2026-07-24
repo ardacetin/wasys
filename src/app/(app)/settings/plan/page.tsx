@@ -1,24 +1,6 @@
 import { requireSession } from "@/lib/session";
-import { PLAN_LIMITS, planLabel, type FeatureKey } from "@/lib/plans";
-import type { Plan } from "@prisma/client";
+import { PACKAGE_FEATURES, PACKAGE_NAME } from "@/lib/plans";
 import { prisma } from "@/lib/db";
-
-const FEATURE_LABELS: Record<FeatureKey, string> = {
-  sharedInbox: "Ortak gelen kutusu",
-  tags: "Etiketleme & filtreleme",
-  templates: "Hazır mesaj şablonları",
-  voiceMessages: "Sesli mesajlar",
-  multiUserChat: "Çoklu kullanıcı sohbeti",
-  mobileApp: "Mobil uygulama",
-  assignmentRules: "Otomatik atama kuralları",
-  reporting: "Raporlama",
-  intentAi: "Intent AI (niyet analizi)",
-  zoho: "Zoho entegrasyonu",
-  shopify: "Shopify entegrasyonu",
-  callCenter: "Çağrı merkezi",
-  apiAccess: "API erişimi",
-  prioritySupport: "Öncelikli destek",
-};
 
 export default async function PlanPage() {
   const session = await requireSession();
@@ -26,8 +8,6 @@ export default async function PlanPage() {
     where: { id: session.user.organizationId },
     include: { _count: { select: { users: true } } },
   });
-  const plan = org.plan as Plan;
-  const features = PLAN_LIMITS[plan].features;
   const usagePercent = Math.min(
     100,
     Math.round((org._count.users / Math.max(org.maxUsers, 1)) * 100),
@@ -38,24 +18,24 @@ export default async function PlanPage() {
       <div>
         <h1 className="font-[family-name:var(--font-display)] text-3xl">Paket</h1>
         <p className="mt-1 text-sm text-ink-muted">
-          {org.name} organizasyonunun aktif planı ve kullanım limitleri
+          {org.name} — tek WASYS paketi; ücretlendirme kullanıcı sayınıza göre
         </p>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
         <div className="rounded-2xl border border-brand bg-brand-soft/40 p-5">
-          <p className="text-xs font-semibold uppercase tracking-wide text-brand">Aktif plan</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-brand">Aktif paket</p>
           <div className="mt-1 font-[family-name:var(--font-display)] text-3xl">
-            {planLabel(plan)}
+            {PACKAGE_NAME}
           </div>
           <p className="mt-2 text-sm text-ink-muted">
-            Plan değişiklikleri WASYS sistem yöneticisi tarafından yapılır.
+            Tüm özellikler dahil. Fiyat farkı yalnızca kullanıcı kotasından gelir.
           </p>
         </div>
 
         <div className="rounded-2xl border border-line bg-bg-elevated p-5">
           <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
-            Kullanıcı limiti
+            Kullanıcı kotası
           </p>
           <div className="mt-1 font-[family-name:var(--font-display)] text-3xl">
             {org._count.users}
@@ -69,36 +49,34 @@ export default async function PlanPage() {
           </div>
           <p className="mt-2 text-xs text-ink-muted">
             {usagePercent >= 100
-              ? "Limitiniz doldu. Artırmak için WASYS yöneticisiyle iletişime geçin."
+              ? "Kota doldu. Artırmak için WASYS yöneticisiyle iletişime geçin."
               : `${org.maxUsers - org._count.users} kullanıcı hakkınız kaldı.`}
           </p>
         </div>
       </div>
 
       <div className="rounded-2xl border border-line bg-white p-5 text-sm">
-        <h2 className="font-semibold">Paketinize dahil özellikler</h2>
+        <h2 className="font-semibold">Pakete dahil özellikler</h2>
         <div className="mt-3 grid gap-2 sm:grid-cols-2">
-          {(Object.entries(features) as [FeatureKey, boolean][]).map(([key, enabled]) => (
-            <div key={key} className={enabled ? "text-ok" : "text-ink-muted"}>
-              {enabled ? "✓" : "–"} {FEATURE_LABELS[key]}
-              {!enabled ? <span className="ml-1 text-xs">(Pro)</span> : null}
+          {PACKAGE_FEATURES.map((label) => (
+            <div key={label} className="text-ok">
+              ✓ {label}
             </div>
           ))}
         </div>
       </div>
 
       <div className="rounded-2xl border border-line bg-bg-elevated p-5 text-sm">
-        <h2 className="font-semibold">Plan değişikliği mi gerekiyor?</h2>
+        <h2 className="font-semibold">Kullanıcı kotası artırmak istiyor musunuz?</h2>
         <p className="mt-2 text-ink-muted">
-          Paket yükseltme, kullanıcı limiti artırma ve özel plan talepleri için WASYS sistem
-          yöneticinizle iletişime geçin. Planınız size özel olarak yönetici panelinden
-          tanımlanır.
+          Kota artırımı WASYS sistem yöneticisi tarafından yapılır. İhtiyacınızı
+          paylaşın, size özel fiyatlandırmayla dönüş yapılsın.
         </p>
         <a
-          href="mailto:destek@wasys.pro?subject=Plan%20de%C4%9Fi%C5%9Fikli%C4%9Fi%20talebi"
+          href="mailto:destek@wasys.pro?subject=Kullan%C4%B1c%C4%B1%20kotas%C4%B1%20art%C4%B1r%C4%B1m%C4%B1"
           className="mt-4 inline-block rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white"
         >
-          Plan değişikliği talep et
+          Kota artırımı talep et
         </a>
       </div>
     </div>

@@ -80,7 +80,7 @@ export default function AdminUsersPage() {
               <th className="px-4 py-3">Kullanıcı</th>
               <th className="px-4 py-3">Rol</th>
               <th className="px-4 py-3">Organizasyon</th>
-              <th className="px-4 py-3">Paket</th>
+              <th className="px-4 py-3">Kota</th>
               <th className="px-4 py-3">Kayıt</th>
             </tr>
           </thead>
@@ -100,7 +100,9 @@ export default function AdminUsersPage() {
                     {u.organization.name}
                   </Link>
                 </td>
-                <td className="px-4 py-3 text-ink-muted">{u.organization.plan}</td>
+                <td className="px-4 py-3 text-ink-muted">
+                  {u.organization.maxUsers} kullanıcı
+                </td>
                 <td className="px-4 py-3 text-xs text-ink-muted">
                   {new Date(u.createdAt).toLocaleDateString("tr-TR")}
                 </td>

@@ -17,7 +17,6 @@ const ROLE_LABELS: Record<string, string> = {
 
 export default function TeamPage() {
   const [users, setUsers] = useState<User[]>([]);
-  const [plan, setPlan] = useState("BASIC");
   const [maxUsers, setMaxUsers] = useState(5);
   const [me, setMe] = useState<{ id: string; role: string } | null>(null);
   const [error, setError] = useState("");
@@ -29,7 +28,6 @@ export default function TeamPage() {
     const res = await fetch("/api/team");
     const data = await res.json();
     setUsers(data.users ?? []);
-    setPlan(data.plan ?? "BASIC");
     setMaxUsers(data.maxUsers ?? 5);
     setMe(data.me ?? null);
   }
@@ -153,7 +151,7 @@ export default function TeamPage() {
       <div>
         <h1 className="font-[family-name:var(--font-display)] text-3xl">Ekip yönetimi</h1>
         <p className="mt-1 text-sm text-ink-muted">
-          {plan} paket · {users.length}/{maxUsers} kullanıcı
+          WASYS · {users.length}/{maxUsers} kullanıcı
         </p>
       </div>
 

@@ -11,7 +11,6 @@ import {
   ClipboardList,
   GitBranch,
   Inbox,
-  KeyRound,
   LayoutDashboard,
   MessageSquareText,
   Radio,
@@ -30,7 +29,6 @@ const tenantLinks = [
   { href: "/settings/automation", label: "Otomasyon", icon: Zap },
   { href: "/settings/templates", label: "Şablonlar", icon: MessageSquareText },
   { href: "/settings/team", label: "Ekip", icon: Users },
-  { href: "/settings/api", label: "API", icon: KeyRound },
   { href: "/settings/plan", label: "Paket", icon: Settings },
 ];
 

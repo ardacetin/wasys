@@ -2,8 +2,6 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { applyAssignmentRules, loadConversationTagIds } from "@/lib/assignment";
 import { runAutoReplies } from "@/lib/auto-reply";
-import { analyzeIntent } from "@/lib/intent-ai";
-import { hasFeature } from "@/lib/plans";
 import {
   sendCloudText,
   verifyMetaSignature,
@@ -215,30 +213,6 @@ export async function POST(req: Request) {
           send: (text) =>
             sendCloudAutoReply(channel, conversation.id, contact.phone, text),
         });
-
-        const org = await prisma.organization.findUnique({
-          where: { id: channel.organizationId },
-          select: { plan: true },
-        });
-
-        if (org && hasFeature(org.plan, "intentAi")) {
-          const recent = await prisma.message.findMany({
-            where: { conversationId: conversation.id },
-            orderBy: { createdAt: "asc" },
-            take: 50,
-            select: { direction: true, body: true },
-          });
-          const result = analyzeIntent(recent);
-          await prisma.intentSuggestion.create({
-            data: {
-              conversationId: conversation.id,
-              intent: result.intent,
-              confidence: result.confidence,
-              summary: result.summary,
-              suggestions: JSON.stringify(result.suggestions),
-            },
-          });
-        }
       }
 
       for (const status of value.statuses ?? []) {

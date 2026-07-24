@@ -12,7 +12,6 @@ const quoteSchema = z.object({
     .max(24)
     .regex(/^[+()\d\s-]+$/, "Geçerli bir telefon numarası girin"),
   userCount: z.coerce.number().int().min(1).max(10_000),
-  plan: z.enum(["BASIC", "PRO", "KARARSIZ"]),
   website: z.string().max(0).optional(),
 });
 
@@ -33,7 +32,6 @@ export async function POST(req: Request) {
     email: parsed.data.email,
     phone: parsed.data.phone,
     userCount: parsed.data.userCount,
-    plan: parsed.data.plan,
   };
 
   const recentDuplicate = await prisma.quoteRequest.findFirst({
@@ -55,6 +53,7 @@ export async function POST(req: Request) {
     data: {
       ...data,
       email: data.email.toLowerCase(),
+      plan: "STANDARD",
     },
   });
 

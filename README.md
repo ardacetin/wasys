@@ -2,7 +2,7 @@
 
 WhatsApp CRM — ortak gelen kutusu, QR ile WhatsApp bağlantısı (Baileys) ve Meta Cloud API desteği.
 
-## Özellikler (Basic MVP)
+## Özellikler
 
 - Ortak gelen kutusu, etiketleme, filtreleme
 - Çok kullanıcılı sohbet / atama
@@ -10,10 +10,8 @@ WhatsApp CRM — ortak gelen kutusu, QR ile WhatsApp bağlantısı (Baileys) ve 
 - Okundu / iletildi göstergeleri
 - WhatsApp **QR** bağlantısı (öncelikli)
 - WhatsApp **Cloud API** (ikincil)
-- Basic / Pro paket kapıları
-- Ekip yönetimi (Basic: 5 kullanıcı)
-- Atama kuralları ve raporlama (Faz 2)
-- Intent AI + Public API (Pro)
+- Tek paket; fiyatlandırma kullanıcı kotasına göre
+- Ekip yönetimi, atama kuralları, otomasyon, CRM ve raporlama
 
 ## Kurulum
 
@@ -84,11 +82,4 @@ Baileys Gateway (:4001)  ← QR / WhatsApp Web
 
 ## Sonraki fazlar
 
-- Çağrı merkezi, Zoho/Shopify, Instagram DM, mobil uygulama
-
-## Faz 2 (Pro çekirdek)
-
-- Atama kuralları (keyword / kanal / atanmamış + round-robin)
-- Intent AI (heuristic niyet analizi + önerilen yanıtlar, Pro)
-- Public REST API (`/api/v1/...` + API anahtarları, Pro)
-- Gerçek zamanlı raporlama paneli
+- Instagram DM, mobil uygulama

@@ -32,7 +32,7 @@ async function main() {
     data: {
       name: "WASYS Demo",
       slug: "wasys-demo",
-      plan: "PRO",
+      plan: "STANDARD",
       maxUsers: 50,
     },
   });

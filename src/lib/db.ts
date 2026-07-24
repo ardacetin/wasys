@@ -211,13 +211,19 @@ async function bootstrapPlatformAdminInProcess(): Promise<void> {
 
   const organization = await prisma.organization.upsert({
     where: { slug: "wasys-demo" },
-    update: { name: "WASYS Demo", plan: "PRO", maxUsers: 50 },
+    update: { name: "WASYS Demo", plan: "STANDARD", maxUsers: 50 },
     create: {
       name: "WASYS Demo",
       slug: "wasys-demo",
-      plan: "PRO",
+      plan: "STANDARD",
       maxUsers: 50,
     },
+  });
+
+  // Eski Basic/Pro kayıtlarını tek pakete taşı
+  await prisma.organization.updateMany({
+    where: { plan: { in: ["BASIC", "PRO"] } },
+    data: { plan: "STANDARD" },
   });
 
   const existingAdmin = await prisma.user.findUnique({

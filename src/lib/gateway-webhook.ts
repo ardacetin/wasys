@@ -14,8 +14,6 @@ import {
   cancelDisconnectAlert,
   scheduleDisconnectAlert,
 } from "@/lib/disconnect-alert";
-import { analyzeIntent } from "@/lib/intent-ai";
-import { hasFeature } from "@/lib/plans";
 import { waGateway } from "@/lib/wa-gateway";
 
 type AutoReplyChannel = { sessionId: string | null };
@@ -233,30 +231,6 @@ export async function handleGatewayEvent(payload: any): Promise<GatewayWebhookRe
       send: (text) =>
         sendAutoReply(channel, conversation.id, contact.phone, text),
     });
-
-    const org = await prisma.organization.findUnique({
-      where: { id: channel.organizationId },
-      select: { plan: true },
-    });
-
-    if (org && hasFeature(org.plan, "intentAi")) {
-      const recent = await prisma.message.findMany({
-        where: { conversationId: conversation.id },
-        orderBy: { createdAt: "asc" },
-        take: 50,
-        select: { direction: true, body: true },
-      });
-      const result = analyzeIntent(recent);
-      await prisma.intentSuggestion.create({
-        data: {
-          conversationId: conversation.id,
-          intent: result.intent,
-          confidence: result.confidence,
-          summary: result.summary,
-          suggestions: JSON.stringify(result.suggestions),
-        },
-      });
-    }
 
     return { status: 200, body: { ok: true } };
   }

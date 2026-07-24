@@ -1,22 +1,7 @@
 import Link from "next/link";
-import {
-  ArrowRight,
-  BarChart3,
-  Bot,
-  Check,
-  CheckCheck,
-  Clock3,
-  Headphones,
-  Inbox,
-  MessageCircleMore,
-  QrCode,
-  ShieldCheck,
-  Sparkles,
-  Tags,
-  Users,
-  Workflow,
-} from "lucide-react";
+import { ArrowRight, BarChart3, Check, CheckCheck, Clock3, Headphones, Inbox, MessageCircleMore, QrCode, ShieldCheck, Sparkles, Tags, Users, Workflow } from "lucide-react";
 import { QuoteForm } from "@/components/marketing/quote-form";
+import { PACKAGE_FEATURES, SEAT_TIERS } from "@/lib/plans";
 
 const features = [
   {
@@ -35,9 +20,9 @@ const features = [
     description: "Satış, destek ve sipariş konuşmalarını saniyeler içinde bulun.",
   },
   {
-    icon: Bot,
-    title: "Intent AI",
-    description: "Müşteri niyetini analiz edin, temsilcinize yanıt önerileri sunun.",
+    icon: Workflow,
+    title: "Otomasyon",
+    description: "Karşılama, meşgul mesajı ve sohbet dağıtımıyla temposu düşmeyen yanıtlar.",
   },
   {
     icon: BarChart3,
@@ -49,24 +34,6 @@ const features = [
     title: "Güvenli erişim",
     description: "Kapalı kayıt, rol bazlı yetki ve organizasyon izolasyonuyla çalışın.",
   },
-];
-
-const basicFeatures = [
-  "5 kullanıcıya kadar",
-  "Sınırsız mesaj ve kişi",
-  "Ortak gelen kutusu",
-  "Etiketler ve gelişmiş filtreler",
-  "Hazır mesaj şablonları",
-  "Sesli mesaj desteği",
-];
-
-const proFeatures = [
-  "Basic paketteki her şey",
-  "Intent AI önerileri",
-  "Otomatik atama kuralları",
-  "API anahtarları",
-  "Gelişmiş raporlama",
-  "Zoho, Shopify ve çağrı merkezi altyapısı",
 ];
 
 export default function HomePage() {
@@ -92,7 +59,7 @@ export default function HomePage() {
               Nasıl çalışır?
             </a>
             <a href="#planlar" className="transition hover:text-brand-deep">
-              Planlar
+              Fiyatlandırma
             </a>
           </nav>
           <div className="flex items-center gap-2">
@@ -212,10 +179,10 @@ export default function HomePage() {
                     </div>
                     <div className="rounded-xl border border-accent/20 bg-accent/8 p-3">
                       <p className="flex items-center gap-1.5 text-[11px] font-bold text-brand-soft">
-                        <Bot size={13} aria-hidden="true" /> Intent AI
+                        <Tags size={13} aria-hidden="true" /> Otomatik atama
                       </p>
                       <p className="mt-1 text-xs text-white/60">
-                        Niyet: Sipariş durumu · Güven %94
+                        Sipariş etiketi · Selin&apos;e yönlendirildi
                       </p>
                     </div>
                   </div>
@@ -339,77 +306,80 @@ export default function HomePage() {
       <section id="planlar" className="scroll-mt-24 py-20 lg:py-28">
         <div className="mx-auto max-w-6xl px-5 lg:px-8">
           <div className="mx-auto max-w-3xl text-center">
-            <p className="text-xs font-bold uppercase tracking-[0.2em] text-brand">Esnek planlar</p>
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-brand">Tek paket</p>
             <h2 className="mt-3 font-[family-name:var(--font-display)] text-4xl tracking-tight sm:text-5xl">
-              Ekibiniz kadar esnek fiyatlandırma
+              Fiyatı belirleyen tek şey: kullanıcı sayısı
             </h2>
             <p className="mt-4 text-base leading-7 text-ink-muted">
-              Sabit bir kalıba sığmayın. Kullanıcı sayınız ve ihtiyaçlarınıza göre size özel teklif
-              hazırlayalım.
+              Basic / Pro yok. Tüm özellikler herkese açık; ücretlendirme ekibinizdeki kullanıcı
+              kotasına göre yapılır.
             </p>
           </div>
-          <div className="mt-12 grid gap-5 lg:grid-cols-2">
-            {[
-              {
-                name: "Basic",
-                description: "WhatsApp iletişimini tek merkezde toplamak isteyen ekipler için.",
-                features: basicFeatures,
-                featured: false,
-              },
-              {
-                name: "Pro",
-                description: "Otomasyon, yapay zekâ ve entegrasyonla ölçeklenen ekipler için.",
-                features: proFeatures,
-                featured: true,
-              },
-            ].map((plan) => (
+
+          <div className="mt-12 grid gap-5 lg:grid-cols-3">
+            {SEAT_TIERS.map((tier) => (
               <article
-                key={plan.name}
-                className={`relative rounded-[1.75rem] border p-7 sm:p-8 ${
-                  plan.featured
+                key={tier.id}
+                className={`relative rounded-[1.75rem] border p-7 ${
+                  "featured" in tier && tier.featured
                     ? "border-brand bg-brand-deep text-white shadow-[0_24px_70px_rgba(7,94,84,0.2)]"
                     : "border-brand-deep/10 bg-white"
                 }`}
               >
-                {plan.featured ? (
-                  <span className="absolute right-6 top-6 rounded-full bg-accent px-3 py-1 text-[11px] font-extrabold text-brand-deep">
-                    EN ÇOK TERCİH EDİLEN
+                {"featured" in tier && tier.featured ? (
+                  <span className="absolute right-5 top-5 rounded-full bg-accent px-3 py-1 text-[11px] font-extrabold text-brand-deep">
+                    POPÜLER
                   </span>
                 ) : null}
-                <p className={`text-sm font-bold ${plan.featured ? "text-brand-soft" : "text-brand"}`}>
-                  {plan.name}
+                <p
+                  className={`text-sm font-bold ${
+                    "featured" in tier && tier.featured ? "text-brand-soft" : "text-brand"
+                  }`}
+                >
+                  {tier.seatsHint}
                 </p>
-                <h3 className="mt-3 font-[family-name:var(--font-display)] text-3xl">Teklif al</h3>
-                <p className={`mt-3 max-w-md text-sm leading-6 ${plan.featured ? "text-white/65" : "text-ink-muted"}`}>
-                  {plan.description}
+                <h3 className="mt-3 font-[family-name:var(--font-display)] text-3xl">{tier.label}</h3>
+                <p
+                  className={`mt-3 text-sm leading-6 ${
+                    "featured" in tier && tier.featured ? "text-white/65" : "text-ink-muted"
+                  }`}
+                >
+                  Aynı paket, aynı özellikler. Kota büyüdükçe fiyatlandırma ölçeklenir.
                 </p>
-                <ul className="mt-7 grid gap-3 sm:grid-cols-2">
-                  {plan.features.map((feature) => (
-                    <li key={feature} className="flex items-start gap-2.5 text-sm">
-                      <span
-                        className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${
-                          plan.featured ? "bg-accent text-brand-deep" : "bg-brand-soft text-brand-deep"
-                        }`}
-                      >
-                        <Check size={12} strokeWidth={3} />
-                      </span>
-                      {feature}
-                    </li>
-                  ))}
-                </ul>
+                <p
+                  className={`mt-6 text-lg font-bold ${
+                    "featured" in tier && tier.featured ? "text-accent" : "text-brand-deep"
+                  }`}
+                >
+                  {tier.priceHint}
+                </p>
                 <a
                   href="#teklif"
-                  className={`mt-8 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl text-sm font-bold transition ${
-                    plan.featured
+                  className={`mt-6 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl text-sm font-bold transition ${
+                    "featured" in tier && tier.featured
                       ? "bg-accent text-brand-deep hover:bg-brand-soft"
                       : "bg-brand text-white hover:bg-brand-deep"
                   }`}
                 >
-                  {plan.name} için teklif iste
+                  Bu ölçek için teklif iste
                   <ArrowRight size={16} />
                 </a>
               </article>
             ))}
+          </div>
+
+          <div className="mt-10 rounded-[1.75rem] border border-brand-deep/10 bg-white p-7 sm:p-8">
+            <h3 className="font-[family-name:var(--font-display)] text-2xl">Pakete dahil</h3>
+            <ul className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {PACKAGE_FEATURES.map((feature) => (
+                <li key={feature} className="flex items-start gap-2.5 text-sm">
+                  <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand-soft text-brand-deep">
+                    <Check size={12} strokeWidth={3} />
+                  </span>
+                  {feature}
+                </li>
+              ))}
+            </ul>
           </div>
         </div>
       </section>
@@ -426,12 +396,12 @@ export default function HomePage() {
               WhatsApp operasyonunuzu birlikte planlayalım.
             </h2>
             <p className="mt-5 max-w-xl text-base leading-7 text-ink-muted">
-              Ekibinizin büyüklüğünü ve hedeflerinizi paylaşın. Doğru paket, kurulum kapsamı ve
+              Kaç kullanıcının bağlanacağını paylaşın. Kurulum kapsamı ve kullanıcı kotanıza göre
               fiyatlandırmayla size dönüş yapalım.
             </p>
             <div className="mt-8 space-y-4">
               {[
-                "İhtiyacınıza göre kullanıcı ve kanal planlaması",
+                "Kullanıcı sayısına göre net fiyatlandırma",
                 "QR veya Cloud API için kurulum danışmanlığı",
                 "Zorunlu taahhüt olmadan ön görüşme",
               ].map((item) => (
@@ -461,7 +431,7 @@ export default function HomePage() {
           </div>
           <div className="flex flex-wrap items-center gap-5 text-sm text-white/60">
             <a href="#ozellikler" className="hover:text-white">Özellikler</a>
-            <a href="#planlar" className="hover:text-white">Planlar</a>
+            <a href="#planlar" className="hover:text-white">Fiyatlandırma</a>
             <a href="#teklif" className="hover:text-white">Teklif al</a>
             <Link href="/giris" className="font-bold text-brand-soft hover:text-white">Giriş yap</Link>
           </div>

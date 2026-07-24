@@ -73,8 +73,7 @@ export default function AdminQuoteRequestsPage() {
           <thead className="bg-white/60 text-xs uppercase tracking-wide text-ink-muted">
             <tr>
               <th className="px-4 py-3">İletişim</th>
-              <th className="px-4 py-3">Paket</th>
-              <th className="px-4 py-3">Kullanıcı</th>
+              <th className="px-4 py-3">Kullanıcı sayısı</th>
               <th className="px-4 py-3">Durum</th>
               <th className="px-4 py-3">Tarih</th>
               <th className="px-4 py-3 text-right">İşlem</th>
@@ -92,8 +91,7 @@ export default function AdminQuoteRequestsPage() {
                     {quote.phone}
                   </a>
                 </td>
-                <td className="px-4 py-3">{quote.plan}</td>
-                <td className="px-4 py-3">{quote.userCount}</td>
+                <td className="px-4 py-3 font-medium">{quote.userCount}</td>
                 <td className="px-4 py-3">{quote.status}</td>
                 <td className="px-4 py-3 text-xs text-ink-muted">
                   {new Date(quote.createdAt).toLocaleString("tr-TR")}
@@ -116,7 +114,7 @@ export default function AdminQuoteRequestsPage() {
             ))}
             {!quotes.length ? (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-ink-muted">
+                <td colSpan={5} className="px-4 py-8 text-center text-ink-muted">
                   Henüz teklif talebi yok.
                 </td>
               </tr>

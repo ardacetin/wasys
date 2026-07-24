@@ -10,9 +10,8 @@ const createOrganizationSchema = z.object({
   ownerName: z.string().trim().min(2).max(80),
   ownerEmail: z.string().email(),
   temporaryPassword: z.string().min(8).max(128),
-  plan: z.enum(["BASIC", "PRO"]).default("BASIC"),
   // Bu müşteri hesabına eklenebilecek toplam kullanıcı (owner + agent + süpervizör)
-  maxUsers: z.coerce.number().int().min(1).max(500).optional(),
+  maxUsers: z.coerce.number().int().min(1).max(500).default(5),
 });
 
 function slugify(input: string) {
@@ -86,14 +85,13 @@ export async function POST(req: Request) {
     slug = `${baseSlug}-${Date.now().toString(36)}`;
   }
 
-  const maxUsers =
-    data.maxUsers ?? (data.plan === "PRO" ? 50 : 5);
+  const maxUsers = data.maxUsers;
 
   const organization = await prisma.organization.create({
     data: {
       name: data.organizationName,
       slug,
-      plan: data.plan,
+      plan: "STANDARD",
       maxUsers,
       users: {
         create: {

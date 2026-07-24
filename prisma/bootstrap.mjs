@@ -38,11 +38,11 @@ async function main() {
 
   const organization = await prisma.organization.upsert({
     where: { slug: "wasys-demo" },
-    update: { name: "WASYS Demo", plan: "PRO", maxUsers: 50 },
+    update: { name: "WASYS Demo", plan: "STANDARD", maxUsers: 50 },
     create: {
       name: "WASYS Demo",
       slug: "wasys-demo",
-      plan: "PRO",
+      plan: "STANDARD",
       maxUsers: 50,
     },
   });
