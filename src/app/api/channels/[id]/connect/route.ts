@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { ChannelStatus } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { waGateway } from "@/lib/wa-gateway";
@@ -109,14 +110,15 @@ export async function GET(
 
   try {
     const status = await waGateway.getStatus(channel.sessionId);
+    const channelStatus = status.status as ChannelStatus;
     const updated = await prisma.channel.update({
       where: { id },
       data: {
-        status: status.status,
+        status: channelStatus,
         qrData: status.qrDataUrl ?? null,
         phoneNumber: status.phoneNumber ?? channel.phoneNumber,
         lastError: status.lastError ?? null,
-        connectedAt: status.status === "CONNECTED" ? new Date() : channel.connectedAt,
+        connectedAt: channelStatus === "CONNECTED" ? new Date() : channel.connectedAt,
       },
     });
     return NextResponse.json({ channel: updated });

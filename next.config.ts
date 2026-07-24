@@ -1,6 +1,14 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Baileys ve gateway native/ESM paketleri Next bundle'ına girmesin;
+  // runtime'da gateway/server.mjs üzerinden yüklenir.
+  serverExternalPackages: [
+    "@whiskeysockets/baileys",
+    "qrcode",
+    "pino",
+    "pino-pretty",
+  ],
   // Hostinger CDN was caching RSC flight payloads for /login as if they were HTML.
   // Force private/no-store on app routes so document navigations always get real HTML.
   async headers() {

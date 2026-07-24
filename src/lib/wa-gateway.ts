@@ -1,11 +1,10 @@
 /**
  * WhatsApp gateway istemcisi.
  *
- * Hostinger'da Next + Baileys aynı Node sürecinde çalışır (server.js).
- * Bu durumda globalThis.__wasysGateway üzerinden doğrudan çağrı yapılır —
- * 4001 portuna HTTP gerekmez (paylaşımlı hostingde loopback engelli olabilir).
- *
- * GATEWAY_MODE=http veya in-process API yoksa eski HTTP yoluna düşer.
+ * Hostinger'da Baileys, Next API route'larıyla aynı Node sürecinde çalışmalı.
+ * server.js gateway'i başlatmamış olsa bile (veya Entry file yanlış olsa bile)
+ * ilk QR/bağlan isteğinde gateway burada lazy-start edilir — HTTP :4001'e
+ * bağımlılık yok.
  */
 
 type GatewayOps = {
@@ -40,21 +39,19 @@ type GatewayOps = {
   }) => Promise<{ externalId?: string }>;
 };
 
-const GATEWAY_URL = process.env.GATEWAY_URL ?? "http://127.0.0.1:4001";
-const GATEWAY_SECRET = process.env.GATEWAY_SECRET ?? "wasys-gateway-secret";
-const FORCE_HTTP = process.env.GATEWAY_MODE === "http";
+type GatewayModule = {
+  startGateway: () => Promise<boolean>;
+  gatewayOps: GatewayOps;
+};
 
-function inProcessGateway(): GatewayOps | null {
-  if (FORCE_HTTP) return null;
-  const ops = (globalThis as { __wasysGateway?: GatewayOps }).__wasysGateway;
-  return ops ?? null;
-}
+const globalStore = globalThis as {
+  __wasysGateway?: GatewayOps;
+  __wasysGatewayStart?: Promise<GatewayOps> | null;
+  __wasysGatewayWebhook?: unknown;
+};
 
-/** Webhook köprüsünün yüklü olduğundan emin ol (in-process olaylar için). */
 async function ensureWebhookBridge() {
-  if ((globalThis as { __wasysGatewayWebhook?: unknown }).__wasysGatewayWebhook) {
-    return;
-  }
+  if (globalStore.__wasysGatewayWebhook) return;
   try {
     await import("@/lib/gateway-webhook");
   } catch (error) {
@@ -62,32 +59,46 @@ async function ensureWebhookBridge() {
   }
 }
 
-async function gatewayFetch(path: string, init?: RequestInit) {
-  let res: Response;
-  try {
-    res = await fetch(`${GATEWAY_URL}${path}`, {
-      ...init,
-      headers: {
-        "Content-Type": "application/json",
-        "x-gateway-secret": GATEWAY_SECRET,
-        ...(init?.headers ?? {}),
-      },
-      cache: "no-store",
-    });
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    throw new Error(
-      `WhatsApp servisine ulaşılamadı (${detail}). Sunucu Entry file=server.js olmalı ve Redeploy sonrası gateway başlamalı.`,
-    );
+async function loadGatewayModule(): Promise<GatewayModule> {
+  // Runtime absolute import — Next webpack gateway/server.mjs'i paketlemez.
+  const { pathToFileURL } = await import("node:url");
+  const { join } = await import("node:path");
+  const gatewayPath = join(process.cwd(), "gateway", "server.mjs");
+  return import(pathToFileURL(gatewayPath).href) as Promise<GatewayModule>;
+}
+
+/**
+ * Gateway'i süreç içinde hazırla. server.js zaten başlattıysa no-op;
+ * başlamadıysa burada Baileys'i ayağa kaldırır.
+ */
+async function ensureGateway(): Promise<GatewayOps> {
+  if (globalStore.__wasysGateway) return globalStore.__wasysGateway;
+
+  if (!globalStore.__wasysGatewayStart) {
+    globalStore.__wasysGatewayStart = (async () => {
+      await ensureWebhookBridge();
+      try {
+        const mod = await loadGatewayModule();
+        await mod.startGateway();
+        const ops = globalStore.__wasysGateway ?? mod.gatewayOps;
+        if (!ops) {
+          throw new Error("gatewayOps kaydı oluşmadı");
+        }
+        globalStore.__wasysGateway = ops;
+        console.log("[WASYS] WhatsApp gateway in-process ready (lazy)");
+        return ops;
+      } catch (error) {
+        globalStore.__wasysGatewayStart = null;
+        const detail = error instanceof Error ? error.message : String(error);
+        console.error("[WASYS] WhatsApp gateway lazy-start failed", error);
+        throw new Error(
+          `WhatsApp servisi başlatılamadı: ${detail}. Baileys bağımlılıklarının kurulu olduğundan ve Entry file=server.js ile Redeploy yapıldığından emin olun.`,
+        );
+      }
+    })();
   }
 
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(
-      (data as { error?: string }).error ?? `Gateway error ${res.status}`,
-    );
-  }
-  return data;
+  return globalStore.__wasysGatewayStart;
 }
 
 export const waGateway = {
@@ -96,25 +107,18 @@ export const waGateway = {
     sessionId: string;
     webhookUrl: string;
   }) {
-    await ensureWebhookBridge();
-    const ops = inProcessGateway();
-    if (ops) return ops.startSession(payload);
-    return gatewayFetch("/sessions/start", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
+    const ops = await ensureGateway();
+    return ops.startSession(payload);
   },
 
   async getStatus(sessionId: string) {
-    const ops = inProcessGateway();
-    if (ops) return ops.getStatus(sessionId);
-    return gatewayFetch(`/sessions/${sessionId}/status`);
+    const ops = await ensureGateway();
+    return ops.getStatus(sessionId);
   },
 
   async stopSession(sessionId: string) {
-    const ops = inProcessGateway();
-    if (ops) return ops.stopSession(sessionId);
-    return gatewayFetch(`/sessions/${sessionId}/stop`, { method: "POST" });
+    const ops = await ensureGateway();
+    return ops.stopSession(sessionId);
   },
 
   async sendText(payload: {
@@ -122,12 +126,8 @@ export const waGateway = {
     to: string;
     text: string;
   }) {
-    const ops = inProcessGateway();
-    if (ops) return ops.sendText(payload);
-    return gatewayFetch("/messages/text", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
+    const ops = await ensureGateway();
+    return ops.sendText(payload);
   },
 
   async sendAudio(payload: {
@@ -136,11 +136,12 @@ export const waGateway = {
     audioUrl: string;
     ptt?: boolean;
   }) {
-    const ops = inProcessGateway();
-    if (ops) return ops.sendAudio(payload);
-    return gatewayFetch("/messages/audio", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
+    const ops = await ensureGateway();
+    return ops.sendAudio(payload);
   },
 };
+
+/** Health / teşhis için: gateway şu an süreç içinde hazır mı? */
+export function isGatewayReady() {
+  return Boolean(globalStore.__wasysGateway);
+}

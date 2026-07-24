@@ -3,6 +3,7 @@ import { dirname, isAbsolute, resolve } from "node:path";
 import { NextResponse } from "next/server";
 import { ensureDatabaseReady, isMissingTableError, prisma } from "@/lib/db";
 import { platformAdminEmails } from "@/lib/platform-admin";
+import { isGatewayReady } from "@/lib/wa-gateway";
 
 function maskEmail(email: string) {
   const [local, domain] = email.split("@");
@@ -185,6 +186,12 @@ export async function GET() {
         sqlite,
       },
       platformAdmin,
+      whatsappGateway: {
+        ready: isGatewayReady(),
+        hint: isGatewayReady()
+          ? null
+          : "Henüz başlatılmadı. Kanallar → QR ile bağlan ilk istekte lazy-start eder; Entry file=server.js olmalı.",
+      },
       authUrlHint: authUrl ? authUrl.replace(/^(https?:\/\/[^/]+).*/, "$1") : null,
       hint: !hasAuthSecret
         ? "Create a .env file in the Hostinger nodejs/ folder with AUTH_SECRET=... then Restart the app."
