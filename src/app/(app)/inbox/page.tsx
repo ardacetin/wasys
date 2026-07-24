@@ -3,8 +3,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatDistanceToNow } from "date-fns";
 import { tr } from "date-fns/locale";
-import { Check, CheckCheck, Filter, Mic, Search, Send } from "lucide-react";
+import { Check, CheckCheck, Filter, LayoutTemplate, Mic, Search, Send, X } from "lucide-react";
 import { cn, initials } from "@/lib/utils";
+
+function fillTemplate(
+  body: string,
+  contact: { name: string | null; phone: string } | undefined,
+) {
+  if (!contact) return body;
+  const name = contact.name?.trim() || contact.phone;
+  return body
+    .replace(/\{\{\s*(ad|isim|name)\s*\}\}/gi, name)
+    .replace(/\{\{\s*(telefon|phone)\s*\}\}/gi, contact.phone);
+}
 
 type Tag = { id: string; name: string; color: string };
 type Conversation = {
@@ -62,6 +73,7 @@ export default function InboxPage() {
   const [assigned, setAssigned] = useState("");
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const loadConversations = useCallback(async () => {
@@ -138,6 +150,28 @@ export default function InboxPage() {
     } else if (data.error) {
       alert(data.error);
     }
+  }
+
+  function insertTemplate(t: Template) {
+    setDraft(fillTemplate(t.body, selected?.contact));
+    setTemplatesOpen(false);
+  }
+
+  function sendTemplate(t: Template) {
+    setTemplatesOpen(false);
+    void sendMessage(fillTemplate(t.body, selected?.contact));
+  }
+
+  /** Typing a template shortcut (e.g. /merhaba) and pressing Enter expands it. */
+  function expandShortcut(): boolean {
+    const text = draft.trim();
+    if (!text.startsWith("/")) return false;
+    const t = templates.find(
+      (x) => x.shortcut && x.shortcut.toLowerCase() === text.toLowerCase(),
+    );
+    if (!t) return false;
+    setDraft(fillTemplate(t.body, selected?.contact));
+    return true;
   }
 
   useEffect(() => {
@@ -345,44 +379,84 @@ export default function InboxPage() {
               <div ref={bottomRef} />
             </div>
 
-            <div className="border-t border-line bg-bg-elevated/90 p-3">
+            <div className="relative border-t border-line bg-bg-elevated/90 p-3">
+              {templatesOpen ? (
+                <div className="absolute bottom-full left-3 right-3 z-10 mb-2 max-h-80 overflow-y-auto rounded-2xl border border-line bg-white p-2 shadow-lg">
+                  <div className="flex items-center justify-between px-2 py-1">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
+                      Hazır şablonlar
+                    </span>
+                    <button onClick={() => setTemplatesOpen(false)} className="text-ink-muted hover:text-ink">
+                      <X size={14} />
+                    </button>
+                  </div>
+                  {templates.length === 0 ? (
+                    <p className="px-2 py-3 text-sm text-ink-muted">
+                      Henüz şablon yok. Ayarlar → Şablonlar bölümünden ekleyin.
+                    </p>
+                  ) : (
+                    templates.map((t) => (
+                      <div
+                        key={t.id}
+                        className="group flex items-start justify-between gap-2 rounded-xl px-2 py-2 hover:bg-brand-soft/50"
+                      >
+                        <button onClick={() => insertTemplate(t)} className="min-w-0 flex-1 text-left">
+                          <div className="flex items-center gap-2">
+                            <span className="truncate text-sm font-semibold">{t.title}</span>
+                            {t.shortcut ? (
+                              <code className="shrink-0 text-[10px] text-brand">{t.shortcut}</code>
+                            ) : null}
+                          </div>
+                          <p className="mt-0.5 line-clamp-2 text-xs text-ink-muted">
+                            {fillTemplate(t.body, selected?.contact)}
+                          </p>
+                        </button>
+                        <button
+                          onClick={() => sendTemplate(t)}
+                          disabled={sending}
+                          className="shrink-0 rounded-lg bg-brand px-2.5 py-1.5 text-xs font-semibold text-white opacity-90 hover:bg-brand-deep disabled:opacity-50"
+                          title="Şablonu hemen gönder"
+                        >
+                          Gönder
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              ) : null}
+
               <div className="mb-2 flex flex-wrap gap-2">
+                <button
+                  onClick={() => setTemplatesOpen((v) => !v)}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-full border border-line px-3 py-1 text-xs font-medium",
+                    templatesOpen ? "bg-brand text-white" : "bg-white hover:bg-brand-soft",
+                  )}
+                >
+                  <LayoutTemplate size={13} />
+                  Şablonlar
+                </button>
                 {buttons.map((b) => (
                   <button
                     key={b.id}
-                    onClick={() => setDraft(b.body)}
+                    onClick={() => setDraft(fillTemplate(b.body, selected?.contact))}
                     className="rounded-full border border-line bg-white px-3 py-1 text-xs hover:bg-brand-soft"
                   >
                     {b.label}
                   </button>
                 ))}
-                <select
-                  className="rounded-full border border-line bg-white px-3 py-1 text-xs"
-                  defaultValue=""
-                  onChange={(e) => {
-                    const t = templates.find((x) => x.id === e.target.value);
-                    if (t) setDraft(t.body);
-                    e.currentTarget.value = "";
-                  }}
-                >
-                  <option value="">Şablon ekle</option>
-                  {templates.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.title}
-                    </option>
-                  ))}
-                </select>
               </div>
               <div className="flex items-end gap-2">
                 <textarea
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                   rows={2}
-                  placeholder="Mesaj yazın..."
+                  placeholder="Mesaj yazın... (/kısayol + Enter şablonu açar)"
                   className="min-h-[48px] flex-1 resize-none rounded-2xl border border-line bg-white px-3 py-2.5 text-sm outline-none ring-brand focus:ring-2"
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && !e.shiftKey) {
                       e.preventDefault();
+                      if (expandShortcut()) return;
                       void sendMessage(draft);
                     }
                   }}

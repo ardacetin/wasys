@@ -28,11 +28,18 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const data = schema.parse(await req.json());
+  const parsed = schema.safeParse(await req.json());
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Başlık ve mesaj içeriği zorunludur" },
+      { status: 400 },
+    );
+  }
+
   const template = await prisma.messageTemplate.create({
     data: {
       organizationId: session.user.organizationId,
-      ...data,
+      ...parsed.data,
     },
   });
   return NextResponse.json({ template });
