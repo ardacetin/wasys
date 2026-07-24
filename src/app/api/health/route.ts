@@ -2,6 +2,45 @@ import { accessSync, constants, existsSync, mkdirSync, statSync } from "node:fs"
 import { dirname, isAbsolute, resolve } from "node:path";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { platformAdminEmails } from "@/lib/platform-admin";
+
+function maskEmail(email: string) {
+  const [local, domain] = email.split("@");
+  if (!domain) return `${email.slice(0, 2)}***`;
+  const visible = local.slice(0, 2);
+  return `${visible}${"*".repeat(Math.max(local.length - 2, 1))}@${domain}`;
+}
+
+async function platformAdminDiagnostics() {
+  const emails = platformAdminEmails();
+  const password = process.env.PLATFORM_ADMIN_PASSWORD || "";
+
+  const looksLikeEmail = emails.length > 0 && emails.every((e) => e.includes("@"));
+  let adminUserExists: boolean | null = null;
+  let adminUserRole: string | null = null;
+  if (emails.length > 0) {
+    try {
+      const user = await prisma.user.findFirst({
+        where: { email: { in: emails } },
+        select: { role: true },
+      });
+      adminUserExists = Boolean(user);
+      adminUserRole = user?.role ?? null;
+    } catch {
+      adminUserExists = null;
+    }
+  }
+
+  return {
+    emailsConfigured: emails.length,
+    maskedEmails: emails.map(maskEmail),
+    emailsLookValid: emails.length > 0 ? looksLikeEmail : null,
+    passwordSet: Boolean(password),
+    passwordLongEnough: password ? password.length >= 12 : null,
+    adminUserExists,
+    adminUserRole,
+  };
+}
 
 function sqliteDiagnostics() {
   const databaseUrl = process.env.DATABASE_URL?.trim() || null;
@@ -82,7 +121,28 @@ export async function GET() {
     }
   }
 
+  const platformAdmin = databaseConnected
+    ? await platformAdminDiagnostics()
+    : null;
+
   const ok = hasAuthSecret && hasDatabaseUrl && databaseConnected;
+
+  let adminHint: string | undefined;
+  if (platformAdmin) {
+    if (platformAdmin.emailsConfigured === 0) {
+      adminHint =
+        "PLATFORM_ADMIN_EMAILS boş. Hostinger .env dosyasına PLATFORM_ADMIN_EMAILS=arda@wasys.pro ekleyip Restart edin.";
+    } else if (platformAdmin.emailsLookValid === false) {
+      adminHint =
+        "PLATFORM_ADMIN_EMAILS geçerli bir e-posta değil (şablon yer tutucusu kalmış olabilir). Gerçek e-postanızı yazıp Restart edin.";
+    } else if (!platformAdmin.passwordSet || platformAdmin.passwordLongEnough === false) {
+      adminHint =
+        "PLATFORM_ADMIN_PASSWORD eksik veya 12 karakterden kısa. En az 12 karakterlik bir şifre yazıp Restart edin; bootstrap admin şifresini bu değere günceller.";
+    } else if (platformAdmin.adminUserExists === false) {
+      adminHint =
+        "Admin kullanıcısı henüz oluşmamış. Restart / Redeploy edin (bootstrap PLATFORM_ADMIN_EMAILS için hesabı oluşturur).";
+    }
+  }
 
   return NextResponse.json(
     {
@@ -98,6 +158,7 @@ export async function GET() {
         error: databaseError,
         sqlite,
       },
+      platformAdmin,
       authUrlHint: authUrl ? authUrl.replace(/^(https?:\/\/[^/]+).*/, "$1") : null,
       hint: !hasAuthSecret
         ? "Create a .env file in the Hostinger nodejs/ folder with AUTH_SECRET=... then Restart the app."
@@ -105,7 +166,7 @@ export async function GET() {
           ? databaseError?.code === "P2021"
             ? "DB dosyası var ama tablolar yok. Redeploy / Restart edin (otomatik prisma db push çalışacak). Entry file=server.js."
             : "SQLite açılamıyor. DATABASE_URL=file:/home/u781807728/domains/wasys.pro/nodejs/data/prod.db; Entry file=server.js; Redeploy. health.database.sqlite alanına bakın."
-        : undefined,
+        : adminHint,
     },
     {
       status: ok ? 200 : 503,

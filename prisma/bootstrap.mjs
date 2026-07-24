@@ -24,9 +24,17 @@ async function main() {
       "PLATFORM_ADMIN_EMAILS must be set when creating the platform admin for the first time",
     );
   }
+  if (!platformAdminEmail.includes("@")) {
+    throw new Error(
+      `PLATFORM_ADMIN_EMAILS is not a valid email (got "${platformAdminEmail}"). Replace the placeholder in .env with your real address.`,
+    );
+  }
   if (platformAdminPassword && platformAdminPassword.length < 12) {
     throw new Error("PLATFORM_ADMIN_PASSWORD must contain at least 12 characters");
   }
+  console.log(
+    `[WASYS bootstrap] platform admin email: ${platformAdminEmail} (password ${platformAdminPassword ? "will be updated from .env" : "kept as-is"})`,
+  );
 
   const organization = await prisma.organization.upsert({
     where: { slug: "wasys-demo" },

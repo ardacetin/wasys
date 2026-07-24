@@ -50,9 +50,29 @@ function run(command, args) {
   }
 }
 
+function runOptional(command, args, label) {
+  const result = spawnSync(command, args, {
+    cwd: projectRoot,
+    env: process.env,
+    stdio: "inherit",
+  });
+  if (result.error || result.status !== 0) {
+    console.error(
+      `[WASYS] ${label} failed (site will still start). Check /api/health for hints.`,
+      result.error ?? `exit code ${result.status}`,
+    );
+  }
+}
+
 run(process.execPath, [resolve(projectRoot, "prisma/prepare-db.mjs")]);
 run(process.execPath, [prismaCli(), "db", "push"]);
-run(process.execPath, [resolve(projectRoot, "prisma/bootstrap.mjs")]);
+// Bootstrap creates/updates the platform admin from PLATFORM_ADMIN_EMAILS +
+// PLATFORM_ADMIN_PASSWORD. A bad .env value must not take the whole site down.
+runOptional(
+  process.execPath,
+  [resolve(projectRoot, "prisma/bootstrap.mjs")],
+  "bootstrap",
+);
 
 const port = Number(process.env.PORT || 3000);
 const hostname = process.env.HOSTNAME || "0.0.0.0";
