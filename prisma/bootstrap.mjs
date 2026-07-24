@@ -4,14 +4,24 @@ import { hash } from "bcryptjs";
 const prisma = new PrismaClient();
 
 async function main() {
-  const platformAdminEmail = process.env.PLATFORM_ADMIN_EMAILS
+  let platformAdminEmail = process.env.PLATFORM_ADMIN_EMAILS
     ?.split(",")[0]
     ?.trim()
     ?.toLowerCase();
   const platformAdminPassword = process.env.PLATFORM_ADMIN_PASSWORD;
 
   if (!platformAdminEmail) {
-    throw new Error("PLATFORM_ADMIN_EMAILS must be set in the server environment");
+    const existingOwner = await prisma.user.findFirst({
+      where: { role: "OWNER" },
+      select: { email: true },
+      orderBy: { createdAt: "asc" },
+    });
+    platformAdminEmail = existingOwner?.email;
+  }
+  if (!platformAdminEmail) {
+    throw new Error(
+      "PLATFORM_ADMIN_EMAILS must be set when creating the platform admin for the first time",
+    );
   }
   if (platformAdminPassword && platformAdminPassword.length < 12) {
     throw new Error("PLATFORM_ADMIN_PASSWORD must contain at least 12 characters");
