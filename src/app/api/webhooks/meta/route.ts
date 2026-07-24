@@ -1,11 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { applyAssignmentRules, loadConversationTagIds } from "@/lib/assignment";
-import {
-  anyAgentOnline,
-  awayMessageRecentlySent,
-  fillAutoMessage,
-} from "@/lib/auto-reply";
+import { runAutoReplies } from "@/lib/auto-reply";
 import { analyzeIntent } from "@/lib/intent-ai";
 import { hasFeature } from "@/lib/plans";
 import {
@@ -211,45 +207,19 @@ export async function POST(req: Request) {
           });
         }
 
-        const org = await prisma.organization.findUnique({
-          where: { id: channel.organizationId },
-          select: {
-            plan: true,
-            welcomeMessageEnabled: true,
-            welcomeMessage: true,
-            awayMessageEnabled: true,
-            awayMessage: true,
-          },
+        await runAutoReplies({
+          organizationId: channel.organizationId,
+          conversationId: conversation.id,
+          contact,
+          isNewConversation,
+          send: (text) =>
+            sendCloudAutoReply(channel, conversation.id, contact.phone, text),
         });
 
-        if (
-          org?.welcomeMessageEnabled &&
-          org.welcomeMessage?.trim() &&
-          isNewConversation
-        ) {
-          await sendCloudAutoReply(
-            channel,
-            conversation.id,
-            contact.phone,
-            fillAutoMessage(org.welcomeMessage.trim(), contact),
-          );
-        }
-
-        if (org?.awayMessageEnabled && org.awayMessage?.trim()) {
-          const awayText = fillAutoMessage(org.awayMessage.trim(), contact);
-          const online = await anyAgentOnline(channel.organizationId);
-          if (
-            !online &&
-            !(await awayMessageRecentlySent(conversation.id, awayText))
-          ) {
-            await sendCloudAutoReply(
-              channel,
-              conversation.id,
-              contact.phone,
-              awayText,
-            );
-          }
-        }
+        const org = await prisma.organization.findUnique({
+          where: { id: channel.organizationId },
+          select: { plan: true },
+        });
 
         if (org && hasFeature(org.plan, "intentAi")) {
           const recent = await prisma.message.findMany({

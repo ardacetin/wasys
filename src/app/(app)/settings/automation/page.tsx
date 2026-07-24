@@ -113,7 +113,8 @@ export default function AutomationPage() {
               <h2 className="font-semibold">Meşgul mesajı</h2>
               <p className="text-xs text-ink-muted">
                 Panelde aktif kimse yokken gelen mesajlara otomatik gönderilir
-                (aynı sohbete 4 saatte bir)
+                (aynı sohbete 4 saatte bir). Yeni sohbette karşılama gittiyse
+                aynı anda meşgul mesajı gitmez.
               </p>
             </div>
             <label className="flex cursor-pointer items-center gap-2 text-sm">
@@ -165,8 +166,10 @@ export default function AutomationPage() {
         <section className="space-y-3 rounded-2xl border border-line bg-bg-elevated p-5">
           <h2 className="font-semibold">Bağlantı uyarısı</h2>
           <p className="text-xs text-ink-muted">
-            WhatsApp bağlantısı (QR veya API) koptuğunda bu adrese otomatik
-            e-posta gönderilir. Boş bırakılırsa yöneticilerin e-postalarına gider.
+            WhatsApp QR bağlantısı koptuğunda (ve ~45 sn içinde geri gelmezse)
+            bu adrese otomatik e-posta gönderilir. Boş bırakılırsa yöneticilerin
+            e-postalarına gider. Panelden bilinçli &quot;Bağlantıyı kes&quot;
+            uyarısı tetiklemez.
           </p>
           <input
             type="email"

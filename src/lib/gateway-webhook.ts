@@ -9,13 +9,12 @@
  */
 import { prisma } from "@/lib/db";
 import { applyAssignmentRules, loadConversationTagIds } from "@/lib/assignment";
+import { runAutoReplies } from "@/lib/auto-reply";
 import {
-  anyAgentOnline,
-  awayMessageRecentlySent,
-  fillAutoMessage,
-} from "@/lib/auto-reply";
+  cancelDisconnectAlert,
+  scheduleDisconnectAlert,
+} from "@/lib/disconnect-alert";
 import { analyzeIntent } from "@/lib/intent-ai";
-import { sendMail } from "@/lib/mailer";
 import { hasFeature } from "@/lib/plans";
 import { waGateway } from "@/lib/wa-gateway";
 
@@ -54,49 +53,6 @@ async function sendAutoReply(
   }
 }
 
-async function notifyDisconnect(channelId: string) {
-  const channel = await prisma.channel.findUnique({
-    where: { id: channelId },
-    include: { organization: { select: { name: true, alertEmail: true } } },
-  });
-  if (!channel) return;
-
-  let recipients: string[] = [];
-  if (channel.organization.alertEmail?.trim()) {
-    recipients = [channel.organization.alertEmail.trim()];
-  } else {
-    const admins = await prisma.user.findMany({
-      where: {
-        organizationId: channel.organizationId,
-        role: { in: ["OWNER", "ADMIN"] },
-      },
-      select: { email: true },
-    });
-    recipients = admins.map((a) => a.email);
-  }
-  if (!recipients.length) return;
-
-  const label = channel.phoneNumber
-    ? `${channel.name} (${channel.phoneNumber})`
-    : channel.name;
-  await sendMail({
-    to: recipients,
-    subject: `WASYS uyarı: ${label} WhatsApp bağlantısı koptu`,
-    text: [
-      `Merhaba,`,
-      ``,
-      `${channel.organization.name} hesabınızdaki "${label}" kanalının WhatsApp bağlantısı kesildi.`,
-      ``,
-      `Mesaj alışverişinin durmaması için panele girip kanalı yeniden bağlayın:`,
-      `https://wasys.pro/settings/channels`,
-      ``,
-      `QR bağlantısı: Kanallar sayfasından "Bağlan" deyip telefonunuzla QR kodu okutun.`,
-      ``,
-      `WASYS`,
-    ].join("\n"),
-  });
-}
-
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function handleGatewayEvent(payload: any): Promise<GatewayWebhookResult> {
   const { event, channelId, sessionId } = payload;
@@ -129,6 +85,7 @@ export async function handleGatewayEvent(payload: any): Promise<GatewayWebhookRe
   }
 
   if (event === "connected") {
+    cancelDisconnectAlert(channel.id);
     await prisma.channel.update({
       where: { id: channel.id },
       data: {
@@ -151,11 +108,11 @@ export async function handleGatewayEvent(payload: any): Promise<GatewayWebhookRe
         qrData: null,
       },
     });
-    // Gerçek kopmalarda (bağlıyken düşme) yöneticilere e-posta uyarısı gönder
+    // Kısa kopmalarda spam olmasın: gecikmeli uyarı; yeniden bağlanırsa iptal
     if (wasConnected) {
-      notifyDisconnect(channel.id).catch((error) =>
-        console.error("[WASYS] bağlantı kopma e-postası gönderilemedi", error),
-      );
+      scheduleDisconnectAlert(channel.id, {
+        urgent: payload.shouldReconnect === false,
+      });
     }
     return { status: 200, body: { ok: true } };
   }
@@ -268,39 +225,19 @@ export async function handleGatewayEvent(payload: any): Promise<GatewayWebhookRe
       });
     }
 
-    const org = await prisma.organization.findUnique({
-      where: { id: channel.organizationId },
-      select: {
-        plan: true,
-        welcomeMessageEnabled: true,
-        welcomeMessage: true,
-        awayMessageEnabled: true,
-        awayMessage: true,
-      },
+    await runAutoReplies({
+      organizationId: channel.organizationId,
+      conversationId: conversation.id,
+      contact,
+      isNewConversation,
+      send: (text) =>
+        sendAutoReply(channel, conversation.id, contact.phone, text),
     });
 
-    // Otomatik karşılama: yeni sohbetin ilk mesajına otomatik yanıt
-    if (
-      org?.welcomeMessageEnabled &&
-      org.welcomeMessage?.trim() &&
-      isNewConversation
-    ) {
-      await sendAutoReply(
-        channel,
-        conversation.id,
-        contact.phone,
-        fillAutoMessage(org.welcomeMessage.trim(), contact),
-      );
-    }
-
-    // Meşgul mesajı: panelde aktif kimse yoksa (spam engelli)
-    if (org?.awayMessageEnabled && org.awayMessage?.trim()) {
-      const awayText = fillAutoMessage(org.awayMessage.trim(), contact);
-      const online = await anyAgentOnline(channel.organizationId);
-      if (!online && !(await awayMessageRecentlySent(conversation.id, awayText))) {
-        await sendAutoReply(channel, conversation.id, contact.phone, awayText);
-      }
-    }
+    const org = await prisma.organization.findUnique({
+      where: { id: channel.organizationId },
+      select: { plan: true },
+    });
 
     if (org && hasFeature(org.plan, "intentAi")) {
       const recent = await prisma.message.findMany({

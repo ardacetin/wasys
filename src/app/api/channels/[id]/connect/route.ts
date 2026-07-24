@@ -80,14 +80,16 @@ export async function DELETE(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  if (channel.sessionId) {
-    await waGateway.stopSession(channel.sessionId).catch(() => undefined);
-  }
-
+  // Önce DB'de kes; gateway logout olayı "beklenmedik kopma" sayılmasın (uyarı maili yok)
   const updated = await prisma.channel.update({
     where: { id },
     data: { status: "DISCONNECTED", qrData: null, lastError: null },
   });
+
+  if (channel.sessionId) {
+    await waGateway.stopSession(channel.sessionId).catch(() => undefined);
+  }
+
   return NextResponse.json({ channel: updated });
 }
 

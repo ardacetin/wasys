@@ -66,6 +66,17 @@ export function AppShell({
     }
   }, [isPlatformAdmin, pathname, router]);
 
+  // Çevrimiçi tespiti: meşgul mesajı + dengeli dağıtım için lastActiveAt
+  useEffect(() => {
+    if (isPlatformAdmin) return;
+    const beat = () => {
+      void fetch("/api/heartbeat", { method: "POST" }).catch(() => undefined);
+    };
+    beat();
+    const t = setInterval(beat, 60_000);
+    return () => clearInterval(t);
+  }, [isPlatformAdmin]);
+
   return (
     <div className="flex min-h-screen">
       <aside className="hidden w-64 shrink-0 border-r border-line bg-panel text-panel-ink md:flex md:flex-col">
