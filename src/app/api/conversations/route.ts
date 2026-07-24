@@ -11,8 +11,12 @@ function touchUserActivity(userId: string) {
   const previous = lastHeartbeat.get(userId) ?? 0;
   if (now - previous < HEARTBEAT_THROTTLE_MS) return;
   lastHeartbeat.set(userId, now);
+  // updateMany: kayıt yoksa (eski oturum / silinmiş kullanıcı) hata fırlatmaz
   prisma.user
-    .update({ where: { id: userId }, data: { lastActiveAt: new Date() } })
+    .updateMany({
+      where: { id: userId },
+      data: { lastActiveAt: new Date() },
+    })
     .catch(() => undefined);
 }
 
