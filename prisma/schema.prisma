@@ -172,6 +172,9 @@ model Channel {
   updatedAt      DateTime      @updatedAt
 
   conversations Conversation[]
+
+  @@index([metaPhoneId])
+  @@index([organizationId])
 }
 
 model Contact {

@@ -3,7 +3,7 @@ import { dirname, isAbsolute, resolve } from "node:path";
 import { NextResponse } from "next/server";
 import { ensureDatabaseReady, isMissingTableError, prisma } from "@/lib/db";
 import { platformAdminEmails } from "@/lib/platform-admin";
-import { isGatewayReady } from "@/lib/wa-gateway";
+import { getGatewayLastError, isGatewayReady, probeGateway } from "@/lib/wa-gateway";
 
 function maskEmail(email: string) {
   const [local, domain] = email.split("@");
@@ -85,7 +85,7 @@ function sqliteDiagnostics() {
   };
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   const hasAuthSecret = Boolean(
     (process.env.AUTH_SECRET && process.env.AUTH_SECRET.trim()) ||
       (process.env.NEXTAUTH_SECRET && process.env.NEXTAUTH_SECRET.trim()),
@@ -93,6 +93,8 @@ export async function GET() {
   const hasDatabaseUrl = Boolean(process.env.DATABASE_URL?.trim());
   const authUrl = process.env.AUTH_URL || process.env.NEXTAUTH_URL || null;
   const sqlite = sqliteDiagnostics();
+  const url = new URL(req.url);
+  const warmupGateway = url.searchParams.get("warmup") !== "0";
 
   let databaseConnected = false;
   let userCount: number | null = null;
@@ -181,6 +183,20 @@ export async function GET() {
       "UYARI: Veritabanı nodejs/ içinde — Redeploy siler. .env'e WASYS_DATA_DIR=/home/u781807728/wasys-data ve DATABASE_URL=file:/home/u781807728/wasys-data/prod.db yazıp Restart edin.";
   }
 
+  const gatewayProbe = warmupGateway
+    ? await probeGateway(15000)
+    : {
+        ready: isGatewayReady(),
+        error: getGatewayLastError(),
+        warmed: false,
+      };
+
+  const smtpConfigured = Boolean(
+    process.env.SMTP_HOST?.trim() &&
+      process.env.SMTP_USER?.trim() &&
+      process.env.SMTP_PASS?.trim(),
+  );
+
   return NextResponse.json(
     {
       ok,
@@ -190,6 +206,8 @@ export async function GET() {
         DATABASE_CONNECTED: databaseConnected,
         AUTH_URL: Boolean(authUrl),
         PERSISTENT_DB: databaseConnected ? !dbInsideDeploy : null,
+        WHATSAPP_GATEWAY: gatewayProbe.ready,
+        SMTP: smtpConfigured,
       },
       database: {
         userCount,
@@ -200,10 +218,17 @@ export async function GET() {
       },
       platformAdmin,
       whatsappGateway: {
-        ready: isGatewayReady(),
-        hint: isGatewayReady()
+        ready: gatewayProbe.ready,
+        warmed: gatewayProbe.warmed,
+        lastError: gatewayProbe.error ?? getGatewayLastError(),
+        hint: gatewayProbe.ready
           ? null
-          : "Henüz başlatılmadı. Kanallar → QR ile bağlan ilk istekte lazy-start eder; Entry file=server.js olmalı.",
+          : gatewayProbe.error ??
+            "Gateway hazır değil. ?warmup=1 ile health'i yenileyin veya Kanallar → QR ile bağlan deneyin. Entry file=server.js.",
+      },
+      smtp: {
+        configured: smtpConfigured,
+        host: process.env.SMTP_HOST ? String(process.env.SMTP_HOST) : null,
       },
       authUrlHint: authUrl ? authUrl.replace(/^(https?:\/\/[^/]+).*/, "$1") : null,
       hint: !hasAuthSecret
@@ -212,7 +237,9 @@ export async function GET() {
           ? databaseError?.code === "P2021"
             ? "Tablolar yok ve otomatik onarım (init.sql) başarısız oldu. Bu sayfayı yenileyin; olmazsa health.database.error mesajına bakın ve Redeploy edin."
             : "SQLite açılamıyor. DATABASE_URL=file:/home/u781807728/wasys-data/prod.db; mkdir -p /home/u781807728/wasys-data; Entry file=server.js; Redeploy."
-          : persistenceHint ?? adminHint,
+          : !gatewayProbe.ready
+            ? `WhatsApp gateway hazır değil: ${gatewayProbe.error ?? "bilinmeyen hata"}. Hostinger loglarında [WASYS] satırlarına bakın.`
+            : persistenceHint ?? adminHint,
     },
     {
       status: ok ? 200 : 503,

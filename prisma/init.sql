@@ -270,6 +270,12 @@ CREATE UNIQUE INDEX "VerificationToken_identifier_token_key" ON "VerificationTok
 CREATE UNIQUE INDEX "Channel_sessionId_key" ON "Channel"("sessionId");
 
 -- CreateIndex
+CREATE INDEX "Channel_metaPhoneId_idx" ON "Channel"("metaPhoneId");
+
+-- CreateIndex
+CREATE INDEX "Channel_organizationId_idx" ON "Channel"("organizationId");
+
+-- CreateIndex
 CREATE INDEX "Contact_organizationId_name_idx" ON "Contact"("organizationId", "name");
 
 -- CreateIndex

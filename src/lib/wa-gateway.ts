@@ -47,6 +47,7 @@ const globalStore = globalThis as {
   __wasysGateway?: GatewayOps;
   __wasysGatewayStart?: Promise<GatewayOps> | null;
   __wasysGatewayWebhook?: unknown;
+  __wasysGatewayLastError?: string | null;
 };
 
 /** Turbopack/webpack'in statik analizinden kaçınan gerçek runtime import. */
@@ -98,11 +99,13 @@ export async function ensureGateway(): Promise<GatewayOps> {
           throw new Error("gatewayOps kaydı oluşmadı");
         }
         globalStore.__wasysGateway = ops;
+        globalStore.__wasysGatewayLastError = null;
         console.log("[WASYS] WhatsApp gateway in-process ready");
         return ops;
       } catch (error) {
         globalStore.__wasysGatewayStart = null;
         const detail = error instanceof Error ? error.message : String(error);
+        globalStore.__wasysGatewayLastError = detail;
         console.error("[WASYS] WhatsApp gateway start failed", error);
         throw new Error(
           `WhatsApp servisi başlatılamadı: ${detail}. Entry file=server.js ile Redeploy edin; Baileys paketinin kurulu olduğundan emin olun.`,
@@ -156,4 +159,38 @@ export const waGateway = {
 
 export function isGatewayReady() {
   return Boolean(globalStore.__wasysGateway);
+}
+
+export function getGatewayLastError() {
+  return globalStore.__wasysGatewayLastError ?? null;
+}
+
+/** Health için: hazır değilse bir kez başlatmayı dene, sonucu raporla. */
+export async function probeGateway(timeoutMs = 12000): Promise<{
+  ready: boolean;
+  error: string | null;
+  warmed: boolean;
+}> {
+  if (globalStore.__wasysGateway) {
+    return { ready: true, error: null, warmed: false };
+  }
+  let warmed = false;
+  try {
+    warmed = true;
+    await Promise.race([
+      ensureGateway(),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error(`Gateway start timeout (${timeoutMs}ms)`)), timeoutMs),
+      ),
+    ]);
+    return { ready: Boolean(globalStore.__wasysGateway), error: null, warmed };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    globalStore.__wasysGatewayLastError = message;
+    return {
+      ready: Boolean(globalStore.__wasysGateway),
+      error: message,
+      warmed,
+    };
+  }
 }
