@@ -47,11 +47,13 @@ Yoksa Auth.js seni `http://0.0.0.0:3000/login?error=Configuration` adresine atar
 
 `error=Configuration` = hâlâ `AUTH_SECRET` yok → yukarıdaki `.env` adımlarını tamamla + Restart.
 
-Bu, Hostinger CDN’nin RSC (React Flight) yanıtını HTML gibi cache’lemesi.
+## Login sayfasında ham kod (`$Sreact.fragment`) görünürse
 
-1. hPanel → **CDN / Cache** → **Purge / Clear Cache** (tüm site)
-2. Node.js uygulamasını **Redeploy / Restart**
-3. Tarayıcıda hard refresh: `Cmd+Shift+R` (veya gizli pencere)
-4. Aç: `https://wasys.pro/login?nocache=1`
+Hostinger CDN eski `/login` RSC yanıtını HTML gibi tutuyor.
 
-Hâlâ bozuksa File Manager’da `nodejs/.next` klasörünü silip yeniden deploy et.
+**Bu adresi kullan (düz HTML, RSC yok):**  
+https://wasys.pro/giris
+
+1. Redeploy
+2. CDN Cache Purge
+3. Gizli pencerede `/giris` aç
