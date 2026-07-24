@@ -1,10 +1,9 @@
 /**
  * WhatsApp gateway istemcisi.
  *
- * Hostinger'da Baileys, Next API route'larıyla aynı Node sürecinde çalışmalı.
- * server.js gateway'i başlatmamış olsa bile (veya Entry file yanlış olsa bile)
- * ilk QR/bağlan isteğinde gateway burada lazy-start edilir — HTTP :4001'e
- * bağımlılık yok.
+ * Next/Turbopack dinamik import(path) ifadesini "too dynamic" diye reddeder.
+ * Bu yüzden gateway/server.mjs runtime'da Function üzerinden yüklenir.
+ * server.js veya instrumentation.ts zaten başlattıysa globalThis kullanılır.
  */
 
 type GatewayOps = {
@@ -50,6 +49,15 @@ const globalStore = globalThis as {
   __wasysGatewayWebhook?: unknown;
 };
 
+/** Turbopack/webpack'in statik analizinden kaçınan gerçek runtime import. */
+function runtimeImport(specifier: string): Promise<GatewayModule> {
+  const importer = new Function(
+    "specifier",
+    "return import(specifier)",
+  ) as (specifier: string) => Promise<GatewayModule>;
+  return importer(specifier);
+}
+
 async function ensureWebhookBridge() {
   if (globalStore.__wasysGatewayWebhook) return;
   try {
@@ -60,18 +68,23 @@ async function ensureWebhookBridge() {
 }
 
 async function loadGatewayModule(): Promise<GatewayModule> {
-  // Runtime absolute import — Next webpack gateway/server.mjs'i paketlemez.
   const { pathToFileURL } = await import("node:url");
   const { join } = await import("node:path");
+  const { existsSync } = await import("node:fs");
+
   const gatewayPath = join(process.cwd(), "gateway", "server.mjs");
-  return import(pathToFileURL(gatewayPath).href) as Promise<GatewayModule>;
+  if (!existsSync(gatewayPath)) {
+    throw new Error(`gateway/server.mjs bulunamadı: ${gatewayPath}`);
+  }
+
+  return runtimeImport(pathToFileURL(gatewayPath).href);
 }
 
 /**
- * Gateway'i süreç içinde hazırla. server.js zaten başlattıysa no-op;
- * başlamadıysa burada Baileys'i ayağa kaldırır.
+ * Gateway'i süreç içinde hazırla. server.js / instrumentation zaten
+ * başlattıysa globalThis üzerinden döner; yoksa lazy-start eder.
  */
-async function ensureGateway(): Promise<GatewayOps> {
+export async function ensureGateway(): Promise<GatewayOps> {
   if (globalStore.__wasysGateway) return globalStore.__wasysGateway;
 
   if (!globalStore.__wasysGatewayStart) {
@@ -85,14 +98,14 @@ async function ensureGateway(): Promise<GatewayOps> {
           throw new Error("gatewayOps kaydı oluşmadı");
         }
         globalStore.__wasysGateway = ops;
-        console.log("[WASYS] WhatsApp gateway in-process ready (lazy)");
+        console.log("[WASYS] WhatsApp gateway in-process ready");
         return ops;
       } catch (error) {
         globalStore.__wasysGatewayStart = null;
         const detail = error instanceof Error ? error.message : String(error);
-        console.error("[WASYS] WhatsApp gateway lazy-start failed", error);
+        console.error("[WASYS] WhatsApp gateway start failed", error);
         throw new Error(
-          `WhatsApp servisi başlatılamadı: ${detail}. Baileys bağımlılıklarının kurulu olduğundan ve Entry file=server.js ile Redeploy yapıldığından emin olun.`,
+          `WhatsApp servisi başlatılamadı: ${detail}. Entry file=server.js ile Redeploy edin; Baileys paketinin kurulu olduğundan emin olun.`,
         );
       }
     })();
@@ -141,7 +154,6 @@ export const waGateway = {
   },
 };
 
-/** Health / teşhis için: gateway şu an süreç içinde hazır mı? */
 export function isGatewayReady() {
   return Boolean(globalStore.__wasysGateway);
 }
