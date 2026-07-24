@@ -198,6 +198,14 @@ export default function ReportsPage() {
   const [report, setReport] = useState<Report | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [exportMode, setExportMode] = useState<"contacts" | "messages">("contacts");
+  const [exportFrom, setExportFrom] = useState(() => {
+    const { from } = presetRange("30d");
+    return from.toISOString().slice(0, 10);
+  });
+  const [exportTo, setExportTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -229,6 +237,49 @@ export default function ReportsPage() {
     // Sensible default granularity for each range
     if (next === "today" || next === "yesterday") setGranularity("hour");
     else if (granularity === "hour") setGranularity("day");
+    const { from, to } = presetRange(next);
+    setExportFrom(from.toISOString().slice(0, 10));
+    setExportTo(to.toISOString().slice(0, 10));
+  }
+
+  async function downloadExcel() {
+    setExporting(true);
+    setExportError("");
+    try {
+      const from = new Date(`${exportFrom}T00:00:00`);
+      const to = new Date(`${exportTo}T23:59:59.999`);
+      if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
+        setExportError("Geçerli bir tarih aralığı seçin");
+        return;
+      }
+      const qs = new URLSearchParams({
+        mode: exportMode,
+        from: from.toISOString(),
+        to: to.toISOString(),
+      });
+      const res = await fetch(`/api/export/conversations?${qs.toString()}`);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setExportError(data.error ?? "Excel indirilemedi");
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download =
+        exportMode === "contacts"
+          ? `wasys-kisiler-${exportFrom}_${exportTo}.xlsx`
+          : `wasys-konusmalar-${exportFrom}_${exportTo}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      setExportError("İndirme başarısız, tekrar deneyin");
+    } finally {
+      setExporting(false);
+    }
   }
 
   const summaryCards = report
@@ -301,6 +352,66 @@ export default function ReportsPage() {
           {error}
         </div>
       )}
+
+      <section className="rounded-2xl border border-line bg-bg-elevated p-5">
+        <h2 className="font-semibold">Excel’e aktar</h2>
+        <p className="mt-1 text-xs text-ink-muted">
+          Seçtiğiniz tarih aralığındaki kişileri veya konuşma mesajlarını .xlsx olarak indirin.
+        </p>
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <label className="text-sm">
+            <span className="mb-1 block text-xs font-medium text-ink-muted">İçerik</span>
+            <select
+              value={exportMode}
+              onChange={(e) =>
+                setExportMode(e.target.value as "contacts" | "messages")
+              }
+              className="w-full rounded-xl border border-line bg-white px-3 py-2 text-sm"
+            >
+              <option value="contacts">Sadece ad soyad ve numara</option>
+              <option value="messages">Ad soyad, numara ve konuşmalar</option>
+            </select>
+          </label>
+          <label className="text-sm">
+            <span className="mb-1 block text-xs font-medium text-ink-muted">Başlangıç</span>
+            <input
+              type="date"
+              value={exportFrom}
+              onChange={(e) => setExportFrom(e.target.value)}
+              className="w-full rounded-xl border border-line bg-white px-3 py-2 text-sm"
+            />
+          </label>
+          <label className="text-sm">
+            <span className="mb-1 block text-xs font-medium text-ink-muted">Bitiş</span>
+            <input
+              type="date"
+              value={exportTo}
+              onChange={(e) => setExportTo(e.target.value)}
+              className="w-full rounded-xl border border-line bg-white px-3 py-2 text-sm"
+            />
+          </label>
+          <div className="flex items-end">
+            <button
+              type="button"
+              disabled={exporting}
+              onClick={() => void downloadExcel()}
+              className="w-full rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+            >
+              {exporting ? "Hazırlanıyor…" : "Excel indir"}
+            </button>
+          </div>
+        </div>
+        {exportError ? (
+          <p className="mt-3 text-sm text-danger">{exportError}</p>
+        ) : (
+          <p className="mt-3 text-xs text-ink-muted">
+            {exportMode === "contacts"
+              ? "Seçilen aralıkta mesajı olan kişilerin ad soyad ve numarası listelenir."
+              : "Seçilen aralıktaki tüm mesajlar ad soyad, numara, yön, içerik ve tarihle birlikte gelir."}
+          </p>
+        )}
+      </section>
 
       {!report && !error && (
         <div className="p-6 text-sm text-ink-muted">Rapor yükleniyor…</div>
