@@ -84,12 +84,19 @@ const HTML = `<!DOCTYPE html>
           });
           var res = await fetch('/api/auth/callback/credentials', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+              'X-Auth-Return-Redirect': '1'
+            },
             credentials: 'same-origin',
             body: body
           });
-          if (!res.ok) throw new Error('Kayıt oldu, giriş başarısız. /giris sayfasını deneyin.');
-          location.href = '/inbox';
+          var data = await res.json().catch(function () { return {}; });
+          var resultUrl = String(data.url || '');
+          if (!res.ok || !resultUrl || resultUrl.indexOf('error=') !== -1) {
+            throw new Error('Kayıt oldu, giriş başarısız. /giris sayfasını deneyin.');
+          }
+          location.assign(resultUrl);
         } catch (err) {
           errorEl.textContent = err && err.message ? err.message : 'Kayıt başarısız';
           errorEl.hidden = false;

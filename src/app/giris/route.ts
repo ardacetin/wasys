@@ -82,19 +82,23 @@ const HTML = `<!DOCTYPE html>
           });
           var res = await fetch('/api/auth/callback/credentials', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+              'X-Auth-Return-Redirect': '1'
+            },
             credentials: 'same-origin',
             body: body
           });
           var data = await res.json().catch(function () { return {}; });
-          if (!res.ok || data.url === '/api/auth/error' || (data.url && data.url.indexOf('error=') !== -1)) {
+          var resultUrl = String(data.url || '');
+          if (!res.ok || !resultUrl || resultUrl.indexOf('error=') !== -1) {
             var msg = 'E-posta veya şifre hatalı';
-            if (String(data.url || '').indexOf('Configuration') !== -1 || String(data.message || '').indexOf('configuration') !== -1) {
+            if (resultUrl.indexOf('Configuration') !== -1 || String(data.message || '').toLowerCase().indexOf('configuration') !== -1) {
               msg = 'AUTH_SECRET eksik. Hostinger nodejs/.env dosyasını kontrol edin.';
             }
             throw new Error(msg);
           }
-          location.href = '/inbox';
+          location.assign(resultUrl);
         } catch (err) {
           errorEl.textContent = err && err.message ? err.message : 'Giriş başarısız';
           errorEl.hidden = false;

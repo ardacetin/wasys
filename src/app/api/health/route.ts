@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { prisma } from "@/lib/db";
 
 export async function GET() {
   const hasAuthSecret = Boolean(
@@ -8,7 +9,28 @@ export async function GET() {
   const hasDatabaseUrl = Boolean(process.env.DATABASE_URL?.trim());
   const authUrl = process.env.AUTH_URL || process.env.NEXTAUTH_URL || null;
 
-  const ok = hasAuthSecret && hasDatabaseUrl;
+  let databaseConnected = false;
+  let userCount: number | null = null;
+  let demoUserExists: boolean | null = null;
+
+  if (hasDatabaseUrl) {
+    try {
+      [userCount, demoUserExists] = await Promise.all([
+        prisma.user.count(),
+        prisma.user
+          .findUnique({
+            where: { email: "demo@wasys.app" },
+            select: { id: true },
+          })
+          .then(Boolean),
+      ]);
+      databaseConnected = true;
+    } catch (error) {
+      console.error("[WASYS Health] database readiness check failed", error);
+    }
+  }
+
+  const ok = hasAuthSecret && hasDatabaseUrl && databaseConnected;
 
   return NextResponse.json(
     {
@@ -16,7 +38,12 @@ export async function GET() {
       checks: {
         AUTH_SECRET: hasAuthSecret,
         DATABASE_URL: hasDatabaseUrl,
+        DATABASE_CONNECTED: databaseConnected,
         AUTH_URL: Boolean(authUrl),
+      },
+      database: {
+        userCount,
+        demoUserExists,
       },
       authUrlHint: authUrl ? authUrl.replace(/^(https?:\/\/[^/]+).*/, "$1") : null,
       hint: !hasAuthSecret

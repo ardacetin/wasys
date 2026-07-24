@@ -6,9 +6,12 @@ export default function HomePage() {
       <div className="wasys-grid pointer-events-none absolute inset-0 opacity-60" />
 
       <header className="relative z-10 mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-6">
-        <div className="font-[family-name:var(--font-display)] text-2xl tracking-tight text-brand-deep">
+        <Link
+          href="/"
+          className="font-[family-name:var(--font-display)] text-2xl tracking-tight text-brand-deep"
+        >
           WASYS
-        </div>
+        </Link>
         <nav className="flex items-center gap-3 text-sm">
           <Link href="/giris" className="rounded-full px-4 py-2 text-ink-muted hover:text-ink">
             Giriş
@@ -17,7 +20,7 @@ export default function HomePage() {
             href="/kayit"
             className="rounded-full bg-brand px-4 py-2 font-semibold text-white shadow-sm transition hover:bg-brand-deep"
           >
-            Başla
+            Ücretsiz kayıt
           </Link>
         </nav>
       </header>
@@ -45,7 +48,7 @@ export default function HomePage() {
               href="/giris"
               className="rounded-full border border-line bg-bg-elevated/80 px-6 py-3 text-sm font-semibold backdrop-blur"
             >
-              Demo giriş
+              Demo hesabına gir
             </Link>
           </div>
           <p className="mt-6 text-sm text-ink-muted">demo@wasys.app / demo1234</p>
