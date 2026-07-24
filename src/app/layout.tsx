@@ -14,8 +14,13 @@ const fraunces = Fraunces({
 });
 
 export const metadata: Metadata = {
-  title: "WASYS — WhatsApp CRM",
-  description: "Ortak gelen kutusu, QR ile WhatsApp bağlantısı ve ekip sohbet yönetimi.",
+  title: {
+    default: "WASYS — WhatsApp CRM",
+    template: "%s | WASYS",
+  },
+  description:
+    "WhatsApp mesajlarınızı ortak gelen kutusunda yönetin; ekibinizi, otomasyonları ve müşteri iletişimini tek platformda büyütün.",
+  keywords: ["WhatsApp CRM", "ortak gelen kutusu", "müşteri yönetimi", "WhatsApp ekip yönetimi"],
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

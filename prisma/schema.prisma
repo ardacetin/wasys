@@ -309,3 +309,19 @@ model IntentSuggestion {
 
   @@index([conversationId, createdAt])
 }
+
+model QuoteRequest {
+  id         String   @id @default(cuid())
+  fullName   String
+  email      String
+  phone      String
+  userCount  Int
+  plan       String
+  status     String   @default("NEW")
+  source     String   @default("LANDING_PAGE")
+  createdAt  DateTime @default(now())
+  contactedAt DateTime?
+
+  @@index([status, createdAt])
+  @@index([email])
+}
