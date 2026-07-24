@@ -36,8 +36,9 @@ npm run db:bootstrap
 yolu `prisma/schema.prisma` konumuna göre çözer; dosya `prisma/prod.db` olarak oluşur.
 `file:./data/prod.db` kullanılırsa `prisma/data` bulunmadığında DB bağlantısı başarısız olur.
 
-`db:bootstrap` mevcut müşteri verilerini silmez; demo organizasyonu ve
-`demo@wasys.app / demo1234` hesabını idempotent olarak hazırlar.
+`db:bootstrap` mevcut müşteri verilerini silmez; yalnızca sunucu environment
+variable’larında tanımlanan platform yöneticisini idempotent olarak hazırlar.
+Kimlik bilgilerini kaynak koduna veya public dokümana yazmayın.
 
 ## `0.0.0.0:3000` yönlendirmesi
 

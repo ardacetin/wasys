@@ -11,19 +11,10 @@ export async function GET() {
 
   let databaseConnected = false;
   let userCount: number | null = null;
-  let demoUserExists: boolean | null = null;
 
   if (hasDatabaseUrl) {
     try {
-      [userCount, demoUserExists] = await Promise.all([
-        prisma.user.count(),
-        prisma.user
-          .findUnique({
-            where: { email: "demo@wasys.app" },
-            select: { id: true },
-          })
-          .then(Boolean),
-      ]);
+      userCount = await prisma.user.count();
       databaseConnected = true;
     } catch (error) {
       console.error("[WASYS Health] database readiness check failed", error);
@@ -43,7 +34,6 @@ export async function GET() {
       },
       database: {
         userCount,
-        demoUserExists,
       },
       authUrlHint: authUrl ? authUrl.replace(/^(https?:\/\/[^/]+).*/, "$1") : null,
       hint: !hasAuthSecret

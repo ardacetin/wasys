@@ -4,6 +4,14 @@ import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 
 async function main() {
+  const adminEmail = process.env.PLATFORM_ADMIN_EMAILS?.split(",")[0]?.trim().toLowerCase();
+  const adminPassword = process.env.PLATFORM_ADMIN_PASSWORD;
+  if (!adminEmail || !adminPassword || adminPassword.length < 12) {
+    throw new Error(
+      "Seed için PLATFORM_ADMIN_EMAILS ve en az 12 karakterli PLATFORM_ADMIN_PASSWORD gerekli",
+    );
+  }
+
   await prisma.intentSuggestion.deleteMany();
   await prisma.apiKey.deleteMany();
   await prisma.assignmentRule.deleteMany();
@@ -29,11 +37,11 @@ async function main() {
     },
   });
 
-  const passwordHash = await hash("demo1234", 10);
+  const passwordHash = await hash(adminPassword, 10);
 
   const owner = await prisma.user.create({
     data: {
-      email: "demo@wasys.app",
+      email: adminEmail,
       name: "Arda Yönetici",
       passwordHash,
       role: "OWNER",
@@ -44,7 +52,7 @@ async function main() {
 
   const agent = await prisma.user.create({
     data: {
-      email: "agent@wasys.app",
+      email: process.env.SEED_AGENT_EMAIL ?? "agent@wasys.local",
       name: "Selin Temsilci",
       passwordHash,
       role: "AGENT",
@@ -249,8 +257,7 @@ async function main() {
   });
 
   console.log("Seed complete");
-  console.log("Login: demo@wasys.app / demo1234 (PRO demo)");
-  console.log("Agent: agent@wasys.app / demo1234");
+  console.log("Platform admin and local agent created from environment configuration");
   console.log("Conversations:", conv1.id);
 }
 

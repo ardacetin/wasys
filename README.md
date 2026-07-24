@@ -37,10 +37,10 @@ npm run dev:gateway
 - Web: http://localhost:3000
 - Gateway: http://localhost:4001
 
-### Demo hesap
+### Platform yöneticisi
 
-- `demo@wasys.app` / `demo1234`
-- `agent@wasys.app` / `demo1234`
+Superadmin kimlik bilgileri repoda tutulmaz. Sunucuda `PLATFORM_ADMIN_EMAILS` ve
+`PLATFORM_ADMIN_PASSWORD` environment variable’larıyla tanımlanır.
 
 ## Production env (wasys.pro)
 
