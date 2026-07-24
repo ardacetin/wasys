@@ -102,6 +102,32 @@ function readBody(req) {
 }
 
 async function notifyWebhook(session, event, payload) {
+  const body = {
+    event,
+    sessionId: session.sessionId,
+    channelId: session.channelId,
+    ...payload,
+  };
+
+  // In-process fast path: when Next.js runs in the same process (server.js on
+  // Hostinger), the webhook handler registers itself on globalThis so we can
+  // skip HTTP entirely (loopback ports may be blocked on shared hosting).
+  const inProcessHandler = globalThis.__wasysGatewayWebhook;
+  if (typeof inProcessHandler === "function") {
+    try {
+      const result = await inProcessHandler(body);
+      if (result && typeof result.status === "number" && result.status >= 400) {
+        logger.warn(
+          { event, sessionId: session.sessionId, status: result.status },
+          "in-process webhook returned error status",
+        );
+      }
+    } catch (err) {
+      logger.error({ err, sessionId: session.sessionId }, "in-process webhook failed");
+    }
+    return;
+  }
+
   try {
     await fetch(session.webhookUrl, {
       method: "POST",
@@ -109,12 +135,7 @@ async function notifyWebhook(session, event, payload) {
         "Content-Type": "application/json",
         "x-gateway-secret": SECRET,
       },
-      body: JSON.stringify({
-        event,
-        sessionId: session.sessionId,
-        channelId: session.channelId,
-        ...payload,
-      }),
+      body: JSON.stringify(body),
     });
   } catch (err) {
     logger.error({ err, sessionId: session.sessionId }, "webhook failed");
@@ -311,6 +332,79 @@ async function sendAudio(sessionId, to, audioUrl, ptt = true) {
   return { externalId: result?.key?.id };
 }
 
+/**
+ * In-process API. When Next.js runs in the same Node process (server.js on
+ * Hostinger single-process hosting), src/lib/wa-gateway.ts calls these
+ * functions directly via globalThis.__wasysGateway — no loopback HTTP needed.
+ * The HTTP server below is just a thin wrapper around the same operations.
+ */
+export const gatewayOps = {
+  health() {
+    return { ok: true, sessions: sessions.size };
+  },
+
+  async startSession({ channelId, sessionId, webhookUrl }) {
+    if (!channelId || !sessionId || !webhookUrl) {
+      throw new Error("channelId, sessionId, webhookUrl required");
+    }
+
+    let session = sessions.get(sessionId);
+    if (!session) {
+      session = { channelId, sessionId, webhookUrl, status: "CONNECTING" };
+      sessions.set(sessionId, session);
+    } else {
+      session.channelId = channelId;
+      session.webhookUrl = webhookUrl;
+    }
+    saveRegistry();
+
+    // Already connected? Don't restart the socket.
+    if (session.status !== "CONNECTED" || !session.sock) {
+      void startSocket(session);
+    }
+    return {
+      ok: true,
+      status: session.status,
+      qrDataUrl: session.qrDataUrl,
+      phoneNumber: session.phoneNumber,
+    };
+  },
+
+  async getStatus(sessionId) {
+    const session = sessions.get(sessionId);
+    if (!session) throw new Error("Session not found");
+    return {
+      status: session.status,
+      qrDataUrl: session.qrDataUrl,
+      phoneNumber: session.phoneNumber,
+      lastError: session.lastError,
+    };
+  },
+
+  async stopSession(sessionId) {
+    const session = sessions.get(sessionId);
+    if (session?.sock) {
+      await session.sock.logout().catch(() => undefined);
+      session.sock.end(undefined);
+    }
+    const authDir = path.join(AUTH_ROOT, sessionId);
+    try {
+      fs.rmSync(authDir, { recursive: true, force: true });
+    } catch {}
+    sessions.delete(sessionId);
+    saveRegistry();
+    return { ok: true };
+  },
+
+  async sendText({ sessionId, to, text }) {
+    return sendText(sessionId, to, text);
+  },
+
+  async sendAudio({ sessionId, to, audioUrl, ptt = true }) {
+    return sendAudio(sessionId, to, audioUrl, ptt);
+  },
+};
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
   if (req.headers["x-gateway-secret"] !== SECRET && url.pathname !== "/health") {
@@ -319,7 +413,7 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (req.method === "GET" && url.pathname === "/health") {
-      return json(res, 200, { ok: true, sessions: sessions.size });
+      return json(res, 200, gatewayOps.health());
     }
 
     if (req.method === "POST" && url.pathname === "/sessions/start") {
@@ -328,66 +422,31 @@ const server = http.createServer(async (req, res) => {
       if (!channelId || !sessionId || !webhookUrl) {
         return json(res, 400, { error: "channelId, sessionId, webhookUrl required" });
       }
-
-      let session = sessions.get(sessionId);
-      if (!session) {
-        session = { channelId, sessionId, webhookUrl, status: "CONNECTING" };
-        sessions.set(sessionId, session);
-      } else {
-        session.channelId = channelId;
-        session.webhookUrl = webhookUrl;
-      }
-      saveRegistry();
-
-      // Already connected? Don't restart the socket.
-      if (session.status !== "CONNECTED" || !session.sock) {
-        void startSocket(session);
-      }
-      return json(res, 200, {
-        ok: true,
-        status: session.status,
-        qrDataUrl: session.qrDataUrl,
-        phoneNumber: session.phoneNumber,
-      });
+      return json(res, 200, await gatewayOps.startSession({ channelId, sessionId, webhookUrl }));
     }
 
     const statusMatch = url.pathname.match(/^\/sessions\/([^/]+)\/status$/);
     if (req.method === "GET" && statusMatch) {
-      const session = sessions.get(statusMatch[1]);
-      if (!session) return json(res, 404, { error: "Session not found" });
-      return json(res, 200, {
-        status: session.status,
-        qrDataUrl: session.qrDataUrl,
-        phoneNumber: session.phoneNumber,
-        lastError: session.lastError,
-      });
+      if (!sessions.has(statusMatch[1])) {
+        return json(res, 404, { error: "Session not found" });
+      }
+      return json(res, 200, await gatewayOps.getStatus(statusMatch[1]));
     }
 
     const stopMatch = url.pathname.match(/^\/sessions\/([^/]+)\/stop$/);
     if (req.method === "POST" && stopMatch) {
-      const session = sessions.get(stopMatch[1]);
-      if (session?.sock) {
-        await session.sock.logout().catch(() => undefined);
-        session.sock.end(undefined);
-      }
-      const authDir = path.join(AUTH_ROOT, stopMatch[1]);
-      try {
-        fs.rmSync(authDir, { recursive: true, force: true });
-      } catch {}
-      sessions.delete(stopMatch[1]);
-      saveRegistry();
-      return json(res, 200, { ok: true });
+      return json(res, 200, await gatewayOps.stopSession(stopMatch[1]));
     }
 
     if (req.method === "POST" && url.pathname === "/messages/text") {
       const body = await readBody(req);
-      const result = await sendText(body.sessionId, body.to, body.text);
+      const result = await gatewayOps.sendText(body);
       return json(res, 200, result);
     }
 
     if (req.method === "POST" && url.pathname === "/messages/audio") {
       const body = await readBody(req);
-      const result = await sendAudio(body.sessionId, body.to, body.audioUrl, body.ptt ?? true);
+      const result = await gatewayOps.sendAudio(body);
       return json(res, 200, result);
     }
 
@@ -400,19 +459,35 @@ const server = http.createServer(async (req, res) => {
 
 export function startGateway() {
   ensureAuthDir();
+
+  // Register the in-process API before anything else: even if the HTTP port
+  // can't be opened (shared hosts may block extra ports), Next API routes in
+  // this process can still drive the gateway directly.
+  globalThis.__wasysGateway = gatewayOps;
+
   return new Promise((resolve) => {
+    let settled = false;
+    const settle = (listening) => {
+      if (settled) return;
+      settled = true;
+      resumeSessions();
+      resolve(listening);
+    };
+
     server.on("error", (err) => {
       if (err.code === "EADDRINUSE") {
-        logger.warn(`Gateway port ${PORT} already in use — assuming gateway is running`);
-        resolve(false);
+        logger.warn(`Gateway port ${PORT} already in use — continuing in-process only`);
       } else {
-        logger.error({ err }, "gateway server error");
+        logger.warn(
+          { err },
+          `gateway HTTP port ${PORT} unavailable — continuing in-process only`,
+        );
       }
+      settle(false);
     });
     server.listen(PORT, "127.0.0.1", () => {
       logger.info(`WASYS WhatsApp gateway listening on 127.0.0.1:${PORT}`);
-      resumeSessions();
-      resolve(true);
+      settle(true);
     });
   });
 }

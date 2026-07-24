@@ -49,7 +49,11 @@ export async function POST(
 
     return NextResponse.json({ channel: updated });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Gateway bağlantı hatası";
+    const raw = err instanceof Error ? err.message : "Gateway bağlantı hatası";
+    const message =
+      /fetch failed|ECONNREFUSED|WhatsApp servisine ulaşılamadı/i.test(raw)
+        ? "WhatsApp servisi başlatılamadı. Hostinger'da Entry file=server.js olduğundan emin olup Redeploy/Restart edin."
+        : raw;
     await prisma.channel.update({
       where: { id },
       data: { status: "ERROR", lastError: message },
