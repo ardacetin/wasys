@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { applyAssignmentRules } from "@/lib/assignment";
+import { analyzeIntent } from "@/lib/intent-ai";
+import { hasFeature } from "@/lib/plans";
 
 function authorized(req: Request) {
   return req.headers.get("x-gateway-secret") === (process.env.GATEWAY_SECRET ?? "wasys-gateway-secret");
@@ -106,6 +109,8 @@ export async function POST(req: Request) {
       },
     });
 
+    const isNewConversation = !conversation;
+
     if (!conversation) {
       conversation = await prisma.conversation.create({
         data: {
@@ -147,6 +152,45 @@ export async function POST(req: Request) {
         externalId: payload.externalId ?? null,
       },
     });
+
+    const assignToId = await applyAssignmentRules({
+      organizationId: channel.organizationId,
+      channelId: channel.id,
+      messageBody: payload.body,
+      isNewConversation,
+      currentAssignedToId: conversation.assignedToId,
+    });
+
+    if (assignToId) {
+      conversation = await prisma.conversation.update({
+        where: { id: conversation.id },
+        data: { assignedToId: assignToId },
+      });
+    }
+
+    const org = await prisma.organization.findUnique({
+      where: { id: channel.organizationId },
+      select: { plan: true },
+    });
+
+    if (org && hasFeature(org.plan, "intentAi")) {
+      const recent = await prisma.message.findMany({
+        where: { conversationId: conversation.id },
+        orderBy: { createdAt: "asc" },
+        take: 50,
+        select: { direction: true, body: true },
+      });
+      const result = analyzeIntent(recent);
+      await prisma.intentSuggestion.create({
+        data: {
+          conversationId: conversation.id,
+          intent: result.intent,
+          confidence: result.confidence,
+          summary: result.summary,
+          suggestions: JSON.stringify(result.suggestions),
+        },
+      });
+    }
 
     return NextResponse.json({ ok: true });
   }

@@ -12,6 +12,8 @@ WhatsApp CRM — ortak gelen kutusu, QR ile WhatsApp bağlantısı (Baileys) ve 
 - WhatsApp **Cloud API** (ikincil)
 - Basic / Pro paket kapıları
 - Ekip yönetimi (Basic: 5 kullanıcı)
+- Atama kuralları ve raporlama (Faz 2)
+- Intent AI + Public API (Pro)
 
 ## Kurulum
 
@@ -40,6 +42,21 @@ npm run dev:gateway
 - `demo@wasys.app` / `demo1234`
 - `agent@wasys.app` / `demo1234`
 
+## Production env (wasys.pro)
+
+Host panelinde **zorunlu**:
+
+```bash
+AUTH_SECRET="<openssl rand -base64 32>"
+AUTH_URL="https://wasys.pro"
+AUTH_TRUST_HOST="true"
+DATABASE_URL="file:./data/prod.db"
+```
+
+Eksik `AUTH_SECRET` Auth.js’te şu hatayı üretir: *There is a problem with the server configuration.*
+
+Sağlık kontrolü: `GET /api/health` (`AUTH_SECRET` / `DATABASE_URL` var mı — değerleri sızdırmaz).
+
 ## WhatsApp QR
 
 1. Giriş yapın → **Kanallar**
@@ -65,8 +82,13 @@ Next.js (UI + API)  ←→  SQLite/Prisma
 Baileys Gateway (:4001)  ← QR / WhatsApp Web
 ```
 
-## Sonraki fazlar (Pro)
+## Sonraki fazlar
 
-- Intent AI, Zoho/Shopify, çağrı merkezi
-- Mobil uygulama (WapCRM)
-- Instagram DM
+- Çağrı merkezi, Zoho/Shopify, Instagram DM, mobil uygulama
+
+## Faz 2 (Pro çekirdek)
+
+- Atama kuralları (keyword / kanal / atanmamış + round-robin)
+- Intent AI (heuristic niyet analizi + önerilen yanıtlar, Pro)
+- Public REST API (`/api/v1/...` + API anahtarları, Pro)
+- Gerçek zamanlı raporlama paneli

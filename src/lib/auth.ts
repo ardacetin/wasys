@@ -9,11 +9,22 @@ const credentialsSchema = z.object({
   password: z.string().min(6),
 });
 
+const authSecret = process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET;
+
+if (!authSecret) {
+  console.error(
+    "[WASYS Auth] AUTH_SECRET (or NEXTAUTH_SECRET) is missing. " +
+      "Set it in the hosting environment — Auth.js will return Configuration error otherwise.",
+  );
+}
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
+  secret: authSecret,
   trustHost: true,
   session: { strategy: "jwt" },
   pages: {
     signIn: "/login",
+    error: "/login",
   },
   providers: [
     Credentials({
@@ -56,13 +67,17 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.plan = (user as { plan?: string }).plan;
         token.organizationName = (user as { organizationName?: string }).organizationName;
       } else if (token.organizationId) {
-        const org = await prisma.organization.findUnique({
-          where: { id: token.organizationId as string },
-          select: { plan: true, name: true },
-        });
-        if (org) {
-          token.plan = org.plan;
-          token.organizationName = org.name;
+        try {
+          const org = await prisma.organization.findUnique({
+            where: { id: token.organizationId as string },
+            select: { plan: true, name: true },
+          });
+          if (org) {
+            token.plan = org.plan;
+            token.organizationName = org.name;
+          }
+        } catch (err) {
+          console.error("[WASYS Auth] jwt org lookup failed", err);
         }
       }
       return token;
