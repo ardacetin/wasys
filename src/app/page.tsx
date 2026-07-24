@@ -16,12 +16,7 @@ export default function HomePage() {
           <Link href="/giris" className="rounded-full px-4 py-2 text-ink-muted hover:text-ink">
             Giriş
           </Link>
-          <Link
-            href="/kayit"
-            className="rounded-full bg-brand px-4 py-2 font-semibold text-white shadow-sm transition hover:bg-brand-deep"
-          >
-            Ücretsiz kayıt
-          </Link>
+          <span className="hidden text-xs text-ink-muted sm:inline">Dış kayıt kapalı</span>
         </nav>
       </header>
 
@@ -39,19 +34,16 @@ export default function HomePage() {
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
             <Link
-              href="/kayit"
-              className="rounded-full bg-ink px-6 py-3 text-sm font-semibold text-bg-elevated transition hover:bg-brand-deep"
-            >
-              Ücretsiz dene
-            </Link>
-            <Link
               href="/giris"
-              className="rounded-full border border-line bg-bg-elevated/80 px-6 py-3 text-sm font-semibold backdrop-blur"
+              className="rounded-full bg-ink px-6 py-3 text-sm font-semibold text-bg-elevated transition hover:bg-brand-deep"
             >
               Demo hesabına gir
             </Link>
           </div>
-          <p className="mt-6 text-sm text-ink-muted">demo@wasys.app / demo1234</p>
+          <div className="mt-6 space-y-1 text-sm text-ink-muted">
+            <p>Demo: demo@wasys.app / demo1234</p>
+            <p>Yeni SaaS hesapları yalnızca WASYS yöneticisi tarafından açılır.</p>
+          </div>
         </div>
 
         <div className="animate-rise-delay relative">
