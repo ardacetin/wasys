@@ -3,7 +3,6 @@ import { hash } from "bcryptjs";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { PLAN_LIMITS } from "@/lib/plans";
 
 export async function GET() {
   const session = await auth();
@@ -23,7 +22,7 @@ export async function GET() {
   return NextResponse.json({
     users,
     plan: org?.plan,
-    maxUsers: org ? PLAN_LIMITS[org.plan].maxUsers : 5,
+    maxUsers: org?.maxUsers ?? 5,
     me: { id: session.user.id, role: session.user.role },
   });
 }
@@ -50,10 +49,10 @@ export async function POST(req: Request) {
   });
   if (!org) return NextResponse.json({ error: "Org not found" }, { status: 404 });
 
-  const limit = PLAN_LIMITS[org.plan].maxUsers;
+  const limit = org.maxUsers;
   if (org._count.users >= limit) {
     return NextResponse.json(
-      { error: `${org.plan} paketinde en fazla ${limit} kullanıcı eklenebilir` },
+      { error: `Organizasyonunuza en fazla ${limit} kullanıcı eklenebilir. Limit artırımı için WASYS yöneticisiyle iletişime geçin.` },
       { status: 400 },
     );
   }

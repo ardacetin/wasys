@@ -150,6 +150,29 @@ export default function PlatformAccountsPage() {
     await load();
   }
 
+  async function changeMaxUsers(org: Organization, event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const fields = new FormData(event.currentTarget);
+    const maxUsers = Number(fields.get("maxUsers"));
+    if (!Number.isInteger(maxUsers) || maxUsers < 1) {
+      setDetailError("Kullanıcı limiti 1 veya daha büyük bir tam sayı olmalı");
+      return;
+    }
+    if (maxUsers === org.maxUsers) return;
+    setDetailError("");
+    const res = await fetch(`/api/admin/organizations/${org.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ maxUsers }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setDetailError(data.error ?? "Kullanıcı limiti güncellenemedi");
+      return;
+    }
+    await load();
+  }
+
   async function deleteOrg(org: Organization) {
     if (
       !window.confirm(
@@ -394,6 +417,27 @@ export default function PlatformAccountsPage() {
                             <option value="PRO">Pro</option>
                           </select>
                         </label>
+                        <form
+                          onSubmit={(e) => void changeMaxUsers(org, e)}
+                          className="flex items-center gap-2 text-sm"
+                        >
+                          <span className="font-medium">Kullanıcı limiti:</span>
+                          <input
+                            key={`${org.id}-${org.maxUsers}`}
+                            name="maxUsers"
+                            type="number"
+                            min={1}
+                            max={500}
+                            defaultValue={org.maxUsers}
+                            className="w-20 rounded-lg border border-line bg-white px-2 py-1 text-sm"
+                          />
+                          <button
+                            type="submit"
+                            className="rounded-lg border border-line px-2.5 py-1 text-xs font-medium text-ink-muted hover:bg-white"
+                          >
+                            Kaydet
+                          </button>
+                        </form>
                         <button
                           type="button"
                           onClick={() => void deleteOrg(org)}
@@ -402,6 +446,10 @@ export default function PlatformAccountsPage() {
                           Organizasyonu sil
                         </button>
                       </div>
+                      <p className="text-xs text-ink-muted">
+                        Paket değiştirildiğinde kullanıcı limiti paketin varsayılanına döner;
+                        gerekiyorsa sonrasında özel limiti tekrar kaydedin.
+                      </p>
 
                       <div className="overflow-hidden rounded-xl border border-line bg-white">
                         <table className="w-full text-left text-sm">

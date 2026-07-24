@@ -4,7 +4,6 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { isPlatformAdmin } from "@/lib/platform-admin";
-import { PLAN_LIMITS } from "@/lib/plans";
 
 async function requirePlatformAdmin() {
   const session = await auth();
@@ -59,7 +58,7 @@ export async function POST(
   }
   const data = parsed.data;
 
-  const limit = Math.max(org.maxUsers, PLAN_LIMITS[org.plan].maxUsers);
+  const limit = org.maxUsers;
   if (org._count.users >= limit) {
     return NextResponse.json(
       { error: `Bu organizasyonda en fazla ${limit} kullanıcı olabilir` },
