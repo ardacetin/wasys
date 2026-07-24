@@ -6,7 +6,7 @@ import type { Plan } from "@prisma/client";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
-  if (!session?.user) redirect("/login");
+  if (!session?.user) redirect("/giris");
 
   return (
     <AppShell
