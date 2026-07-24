@@ -9,6 +9,26 @@ const credentialsSchema = z.object({
   password: z.string().min(6),
 });
 
+/**
+ * Hostinger runs `next start -H 0.0.0.0`. Without AUTH_URL, Auth.js redirects to
+ * http://0.0.0.0:3000/... — force the public site URL in production.
+ */
+function resolveAuthUrl() {
+  const fromEnv = (process.env.AUTH_URL || process.env.NEXTAUTH_URL || "").trim();
+  if (fromEnv && !fromEnv.includes("0.0.0.0") && !fromEnv.includes("127.0.0.1")) {
+    return fromEnv.replace(/\/$/, "");
+  }
+  if (process.env.NODE_ENV === "production") {
+    return "https://wasys.pro";
+  }
+  return "http://localhost:3000";
+}
+
+const authUrl = resolveAuthUrl();
+process.env.AUTH_URL = authUrl;
+process.env.NEXTAUTH_URL = authUrl;
+process.env.AUTH_TRUST_HOST = "true";
+
 // Hostinger: prefer process env; Next also auto-loads `.env` / `.env.production` from app root
 const authSecret =
   process.env.AUTH_SECRET?.trim() ||

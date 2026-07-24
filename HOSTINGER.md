@@ -34,7 +34,18 @@ npx prisma db push
 npm run db:seed
 ```
 
-## Login sayfasında ham kod (`$Sreact.fragment`) görünürse
+## `0.0.0.0:3000` yönlendirmesi
+
+Hostinger uygulamayı `0.0.0.0` üzerinde dinletir. `.env` içinde **mutlaka**:
+
+```env
+AUTH_URL=https://wasys.pro
+NEXTAUTH_URL=https://wasys.pro
+```
+
+Yoksa Auth.js seni `http://0.0.0.0:3000/login?error=Configuration` adresine atar.
+
+`error=Configuration` = hâlâ `AUTH_SECRET` yok → yukarıdaki `.env` adımlarını tamamla + Restart.
 
 Bu, Hostinger CDN’nin RSC (React Flight) yanıtını HTML gibi cache’lemesi.
 
