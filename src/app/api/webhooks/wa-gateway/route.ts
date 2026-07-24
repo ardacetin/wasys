@@ -1,8 +1,88 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { applyAssignmentRules } from "@/lib/assignment";
+import {
+  anyAgentOnline,
+  awayMessageRecentlySent,
+  fillAutoMessage,
+} from "@/lib/auto-reply";
 import { analyzeIntent } from "@/lib/intent-ai";
+import { sendMail } from "@/lib/mailer";
 import { hasFeature } from "@/lib/plans";
+import { waGateway } from "@/lib/wa-gateway";
+
+type AutoReplyChannel = { sessionId: string | null };
+
+async function sendAutoReply(
+  channel: AutoReplyChannel,
+  conversationId: string,
+  phone: string,
+  text: string,
+) {
+  if (!channel.sessionId) return;
+  try {
+    const result = await waGateway.sendText({
+      sessionId: channel.sessionId,
+      to: phone,
+      text,
+    });
+    await prisma.message.create({
+      data: {
+        conversationId,
+        direction: "OUTBOUND",
+        type: "TEXT",
+        status: "SENT",
+        body: text,
+        externalId: result.externalId ?? null,
+      },
+    });
+  } catch (error) {
+    console.error("[WASYS auto-reply] otomatik mesaj gönderilemedi", error);
+  }
+}
+
+async function notifyDisconnect(channelId: string) {
+  const channel = await prisma.channel.findUnique({
+    where: { id: channelId },
+    include: { organization: { select: { name: true, alertEmail: true } } },
+  });
+  if (!channel) return;
+
+  let recipients: string[] = [];
+  if (channel.organization.alertEmail?.trim()) {
+    recipients = [channel.organization.alertEmail.trim()];
+  } else {
+    const admins = await prisma.user.findMany({
+      where: {
+        organizationId: channel.organizationId,
+        role: { in: ["OWNER", "ADMIN"] },
+      },
+      select: { email: true },
+    });
+    recipients = admins.map((a) => a.email);
+  }
+  if (!recipients.length) return;
+
+  const label = channel.phoneNumber
+    ? `${channel.name} (${channel.phoneNumber})`
+    : channel.name;
+  await sendMail({
+    to: recipients,
+    subject: `WASYS uyarı: ${label} WhatsApp bağlantısı koptu`,
+    text: [
+      `Merhaba,`,
+      ``,
+      `${channel.organization.name} hesabınızdaki "${label}" kanalının WhatsApp bağlantısı kesildi.`,
+      ``,
+      `Mesaj alışverişinin durmaması için panele girip kanalı yeniden bağlayın:`,
+      `https://wasys.pro/settings/channels`,
+      ``,
+      `QR bağlantısı: Kanallar sayfasından "Bağlan" deyip telefonunuzla QR kodu okutun.`,
+      ``,
+      `WASYS`,
+    ].join("\n"),
+  });
+}
 
 function authorized(req: Request) {
   return req.headers.get("x-gateway-secret") === (process.env.GATEWAY_SECRET ?? "wasys-gateway-secret");
@@ -52,6 +132,7 @@ export async function POST(req: Request) {
   }
 
   if (event === "disconnected") {
+    const wasConnected = channel.status === "CONNECTED";
     await prisma.channel.update({
       where: { id: channel.id },
       data: {
@@ -59,6 +140,12 @@ export async function POST(req: Request) {
         qrData: null,
       },
     });
+    // Gerçek kopmalarda (bağlıyken düşme) yöneticilere e-posta uyarısı gönder
+    if (wasConnected) {
+      notifyDisconnect(channel.id).catch((error) =>
+        console.error("[WASYS] bağlantı kopma e-postası gönderilemedi", error),
+      );
+    }
     return NextResponse.json({ ok: true });
   }
 
@@ -170,8 +257,37 @@ export async function POST(req: Request) {
 
     const org = await prisma.organization.findUnique({
       where: { id: channel.organizationId },
-      select: { plan: true },
+      select: {
+        plan: true,
+        welcomeMessageEnabled: true,
+        welcomeMessage: true,
+        awayMessageEnabled: true,
+        awayMessage: true,
+      },
     });
+
+    // Otomatik karşılama: yeni sohbetin ilk mesajına otomatik yanıt
+    if (
+      org?.welcomeMessageEnabled &&
+      org.welcomeMessage?.trim() &&
+      isNewConversation
+    ) {
+      await sendAutoReply(
+        channel,
+        conversation.id,
+        contact.phone,
+        fillAutoMessage(org.welcomeMessage.trim(), contact),
+      );
+    }
+
+    // Meşgul mesajı: panelde aktif kimse yoksa (spam engelli)
+    if (org?.awayMessageEnabled && org.awayMessage?.trim()) {
+      const awayText = fillAutoMessage(org.awayMessage.trim(), contact);
+      const online = await anyAgentOnline(channel.organizationId);
+      if (!online && !(await awayMessageRecentlySent(conversation.id, awayText))) {
+        await sendAutoReply(channel, conversation.id, contact.phone, awayText);
+      }
+    }
 
     if (org && hasFeature(org.plan, "intentAi")) {
       const recent = await prisma.message.findMany({

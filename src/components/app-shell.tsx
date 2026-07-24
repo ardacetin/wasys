@@ -13,6 +13,7 @@ import {
   Radio,
   Settings,
   Users,
+  Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -21,6 +22,7 @@ const links = [
   { href: "/reports", label: "Raporlar", icon: BarChart3 },
   { href: "/settings/channels", label: "Kanallar", icon: Radio },
   { href: "/settings/rules", label: "Atama kuralları", icon: GitBranch },
+  { href: "/settings/automation", label: "Otomasyon", icon: Zap },
   { href: "/settings/templates", label: "Şablonlar", icon: MessageSquareText },
   { href: "/settings/team", label: "Ekip", icon: Users },
   { href: "/settings/api", label: "API", icon: KeyRound },

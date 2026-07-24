@@ -2,11 +2,27 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 
+// Çevrimiçi tespiti için heartbeat: dakikada en fazla bir kez lastActiveAt güncelle
+const HEARTBEAT_THROTTLE_MS = 60 * 1000;
+const lastHeartbeat = new Map<string, number>();
+
+function touchUserActivity(userId: string) {
+  const now = Date.now();
+  const previous = lastHeartbeat.get(userId) ?? 0;
+  if (now - previous < HEARTBEAT_THROTTLE_MS) return;
+  lastHeartbeat.set(userId, now);
+  prisma.user
+    .update({ where: { id: userId }, data: { lastActiveAt: new Date() } })
+    .catch(() => undefined);
+}
+
 export async function GET(req: Request) {
   const session = await auth();
   if (!session?.user?.organizationId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  touchUserActivity(session.user.id);
 
   const { searchParams } = new URL(req.url);
   const tagId = searchParams.get("tagId");
