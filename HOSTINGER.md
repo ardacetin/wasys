@@ -29,10 +29,15 @@ SSH veya Node terminal:
 
 ```bash
 cd ~/domains/wasys.pro/nodejs
-mkdir -p data
-npx prisma db push
-npm run db:seed
+npm run db:bootstrap
 ```
+
+`.env` içindeki SQLite yolu `DATABASE_URL=file:./prod.db` olmalı. Prisma göreli
+yolu `prisma/schema.prisma` konumuna göre çözer; dosya `prisma/prod.db` olarak oluşur.
+`file:./data/prod.db` kullanılırsa `prisma/data` bulunmadığında DB bağlantısı başarısız olur.
+
+`db:bootstrap` mevcut müşteri verilerini silmez; demo organizasyonu ve
+`demo@wasys.app / demo1234` hesabını idempotent olarak hazırlar.
 
 ## `0.0.0.0:3000` yönlendirmesi
 

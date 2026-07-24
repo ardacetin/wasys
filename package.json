@@ -7,10 +7,11 @@
     "dev:gateway": "tsx gateway/server.ts",
     "dev:all": "npm run dev & npm run dev:gateway",
     "build": "prisma generate && next build",
-    "start": "prisma db push && next start",
+    "start": "prisma db push && node prisma/bootstrap.mjs && next start",
     "lint": "eslint",
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
+    "db:bootstrap": "prisma db push && node prisma/bootstrap.mjs",
     "db:studio": "prisma studio",
     "postinstall": "prisma generate"
   },
