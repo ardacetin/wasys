@@ -67,7 +67,16 @@ const handle = app.getRequestHandler();
 
 app
   .prepare()
-  .then(() => {
+  .then(async () => {
+    // WhatsApp QR gateway (Baileys) runs inside the same process so it works on
+    // single-process hosts like Hostinger. Next talks to it over localhost:4001.
+    try {
+      const { startGateway } = await import("./gateway/server.mjs");
+      await startGateway();
+    } catch (error) {
+      console.error("[WASYS] WhatsApp gateway failed to start", error);
+    }
+
     createServer((req, res) => {
       const parsedUrl = parse(req.url, true);
       handle(req, res, parsedUrl);

@@ -58,6 +58,34 @@ export async function POST(
   }
 }
 
+export async function DELETE(
+  _req: Request,
+  ctx: { params: Promise<{ id: string }> },
+) {
+  const session = await auth();
+  if (!session?.user?.organizationId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { id } = await ctx.params;
+  const channel = await prisma.channel.findFirst({
+    where: { id, organizationId: session.user.organizationId },
+  });
+  if (!channel) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  if (channel.sessionId) {
+    await waGateway.stopSession(channel.sessionId).catch(() => undefined);
+  }
+
+  const updated = await prisma.channel.update({
+    where: { id },
+    data: { status: "DISCONNECTED", qrData: null, lastError: null },
+  });
+  return NextResponse.json({ channel: updated });
+}
+
 export async function GET(
   _req: Request,
   ctx: { params: Promise<{ id: string }> },
