@@ -33,3 +33,14 @@ mkdir -p data
 npx prisma db push
 npm run db:seed
 ```
+
+## Login sayfasında ham kod (`$Sreact.fragment`) görünürse
+
+Bu, Hostinger CDN’nin RSC (React Flight) yanıtını HTML gibi cache’lemesi.
+
+1. hPanel → **CDN / Cache** → **Purge / Clear Cache** (tüm site)
+2. Node.js uygulamasını **Redeploy / Restart**
+3. Tarayıcıda hard refresh: `Cmd+Shift+R` (veya gizli pencere)
+4. Aç: `https://wasys.pro/login?nocache=1`
+
+Hâlâ bozuksa File Manager’da `nodejs/.next` klasörünü silip yeniden deploy et.
