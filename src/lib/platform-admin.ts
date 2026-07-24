@@ -1,7 +1,5 @@
-const DEFAULT_PLATFORM_ADMIN = "demo@wasys.app";
-
 export function platformAdminEmails() {
-  return (process.env.PLATFORM_ADMIN_EMAILS || DEFAULT_PLATFORM_ADMIN)
+  return (process.env.PLATFORM_ADMIN_EMAILS || "")
     .split(",")
     .map((email) => email.trim().toLowerCase())
     .filter(Boolean);

@@ -4,6 +4,19 @@ import { hash } from "bcryptjs";
 const prisma = new PrismaClient();
 
 async function main() {
+  const platformAdminEmail = process.env.PLATFORM_ADMIN_EMAILS
+    ?.split(",")[0]
+    ?.trim()
+    ?.toLowerCase();
+  const platformAdminPassword = process.env.PLATFORM_ADMIN_PASSWORD;
+
+  if (!platformAdminEmail) {
+    throw new Error("PLATFORM_ADMIN_EMAILS must be set in the server environment");
+  }
+  if (platformAdminPassword && platformAdminPassword.length < 12) {
+    throw new Error("PLATFORM_ADMIN_PASSWORD must contain at least 12 characters");
+  }
+
   const organization = await prisma.organization.upsert({
     where: { slug: "wasys-demo" },
     update: { name: "WASYS Demo", plan: "PRO", maxUsers: 50 },
@@ -15,9 +28,20 @@ async function main() {
     },
   });
 
-  const passwordHash = await hash("demo1234", 12);
+  const existingAdmin = await prisma.user.findUnique({
+    where: { email: platformAdminEmail },
+    select: { passwordHash: true },
+  });
+  if (!existingAdmin && !platformAdminPassword) {
+    throw new Error(
+      "PLATFORM_ADMIN_PASSWORD must be set when creating the platform admin for the first time",
+    );
+  }
+  const passwordHash = platformAdminPassword
+    ? await hash(platformAdminPassword, 12)
+    : existingAdmin.passwordHash;
   await prisma.user.upsert({
-    where: { email: "demo@wasys.app" },
+    where: { email: platformAdminEmail },
     update: {
       name: "WASYS Yönetici",
       passwordHash,
@@ -25,7 +49,7 @@ async function main() {
       organizationId: organization.id,
     },
     create: {
-      email: "demo@wasys.app",
+      email: platformAdminEmail,
       name: "WASYS Yönetici",
       passwordHash,
       role: "OWNER",
@@ -66,7 +90,7 @@ async function main() {
     });
   }
 
-  console.log("WASYS bootstrap complete: demo@wasys.app is ready");
+  console.log("WASYS bootstrap complete: platform admin is ready");
 }
 
 main()

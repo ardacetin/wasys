@@ -45,15 +45,15 @@ const HTML = `<!DOCTYPE html>
     </div>
     <form id="form">
       <label>E-posta
-        <input name="email" type="email" required value="demo@wasys.app" autocomplete="username" />
+        <input name="email" type="email" required placeholder="E-posta adresiniz" autocomplete="username" />
       </label>
       <label>Şifre
-        <input name="password" type="password" required value="demo1234" autocomplete="current-password" />
+        <input name="password" type="password" required placeholder="Şifreniz" autocomplete="current-password" />
       </label>
       <div id="error" class="err" hidden></div>
       <button id="submit" type="submit">Giriş yap</button>
     </form>
-    <div class="foot">Demo: <strong>demo@wasys.app</strong> / <strong>demo1234</strong></div>
+    <div class="foot">Hesabınız WASYS yöneticisi tarafından oluşturulur.</div>
   </div>
   <script>
     (function () {
