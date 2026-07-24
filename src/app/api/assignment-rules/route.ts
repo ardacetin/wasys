@@ -36,7 +36,34 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Yetkisiz" }, { status: 403 });
   }
 
-  const data = schema.parse(await req.json());
+  const parsed = schema.safeParse(await req.json());
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: parsed.error.issues[0]?.message ?? "Geçersiz kural verisi" },
+      { status: 400 },
+    );
+  }
+  const data = parsed.data;
+
+  if (data.matchType === "KEYWORD" && !data.matchValue?.trim()) {
+    return NextResponse.json(
+      { error: "KEYWORD kuralı için eşleşme değeri (kelime) zorunludur" },
+      { status: 400 },
+    );
+  }
+  if (data.matchType === "TAG" && !data.matchValue?.trim()) {
+    return NextResponse.json(
+      { error: "TAG kuralı için bir etiket seçmelisiniz" },
+      { status: 400 },
+    );
+  }
+  if (data.matchType === "CHANNEL" && !data.matchValue?.trim()) {
+    return NextResponse.json(
+      { error: "CHANNEL kuralı için kanal seçmelisiniz (* tüm kanallar)" },
+      { status: 400 },
+    );
+  }
+
   const rule = await prisma.assignmentRule.create({
     data: {
       organizationId: session.user.organizationId,

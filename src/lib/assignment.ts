@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 
-type RuleContext = {
+export type RuleContext = {
   organizationId: string;
   channelId: string;
   messageBody?: string | null;
@@ -20,7 +20,6 @@ async function pickAgent(
     role: { in: ["AGENT", "ADMIN", "OWNER"] as ("AGENT" | "ADMIN" | "OWNER")[] },
   };
 
-  // Önce çevrimiçi (son 5 dk aktif) ekip üyeleri; kimse yoksa tüm ekip
   let agents = await prisma.user.findMany({
     where: {
       ...baseWhere,
@@ -42,7 +41,6 @@ async function pickAgent(
     return agents[Math.floor(Math.random() * agents.length)].id;
   }
 
-  // BALANCED: açık sohbeti en az olan ekip üyesi
   const counts = await Promise.all(
     agents.map(async (a) => ({
       id: a.id,
@@ -55,9 +53,35 @@ async function pickAgent(
   return counts[0]?.id ?? null;
 }
 
+/** Tek bir kuralın bağlamla eşleşip eşleşmediği (test edilebilir). */
+export function ruleMatches(
+  rule: { matchType: string; matchValue: string | null },
+  ctx: RuleContext,
+): boolean {
+  const body = (ctx.messageBody ?? "").toLowerCase();
+
+  switch (rule.matchType) {
+    case "KEYWORD":
+      return Boolean(
+        rule.matchValue && body.includes(rule.matchValue.toLowerCase()),
+      );
+    case "CHANNEL":
+      return rule.matchValue === ctx.channelId || rule.matchValue === "*";
+    case "TAG":
+      return Boolean(
+        rule.matchValue && (ctx.tagIds ?? []).includes(rule.matchValue),
+      );
+    case "UNASSIGNED":
+      return ctx.isNewConversation || !ctx.currentAssignedToId;
+    default:
+      return false;
+  }
+}
+
 /**
- * Applies the first matching active assignment rule (by priority ASC).
- * Only assigns when conversation is currently unassigned, unless matchType is CHANNEL with explicit force via UNASSIGNED rules.
+ * İlk eşleşen aktif kuralı uygular (öncelik ASC).
+ * Sohbet zaten atanmışsa dokunmaz.
+ * Hiçbir kural eşleşmezse organizasyon distributionMode (BALANCED/RANDOM) kullanılır.
  */
 export async function applyAssignmentRules(ctx: RuleContext) {
   if (ctx.currentAssignedToId) return null;
@@ -67,29 +91,8 @@ export async function applyAssignmentRules(ctx: RuleContext) {
     orderBy: [{ priority: "asc" }, { createdAt: "asc" }],
   });
 
-  const body = (ctx.messageBody ?? "").toLowerCase();
-
   for (const rule of rules) {
-    let matched = false;
-
-    switch (rule.matchType) {
-      case "KEYWORD":
-        matched = !!rule.matchValue && body.includes(rule.matchValue.toLowerCase());
-        break;
-      case "CHANNEL":
-        matched = rule.matchValue === ctx.channelId || rule.matchValue === "*";
-        break;
-      case "TAG":
-        matched = !!rule.matchValue && (ctx.tagIds ?? []).includes(rule.matchValue);
-        break;
-      case "UNASSIGNED":
-        matched = ctx.isNewConversation || !ctx.currentAssignedToId;
-        break;
-      default:
-        matched = false;
-    }
-
-    if (!matched) continue;
+    if (!ruleMatches(rule, ctx)) continue;
 
     let assignToId = rule.assignToId;
     if (!assignToId) {
@@ -100,7 +103,6 @@ export async function applyAssignmentRules(ctx: RuleContext) {
     return assignToId;
   }
 
-  // Hiçbir kural eşleşmediyse organizasyonun genel dağıtım modu uygulanır
   const org = await prisma.organization.findUnique({
     where: { id: ctx.organizationId },
     select: { distributionMode: true },
@@ -110,4 +112,13 @@ export async function applyAssignmentRules(ctx: RuleContext) {
   }
 
   return null;
+}
+
+/** Sohbetin etiket id listesini yükler (TAG kuralları için). */
+export async function loadConversationTagIds(conversationId: string) {
+  const rows = await prisma.conversationTag.findMany({
+    where: { conversationId },
+    select: { tagId: true },
+  });
+  return rows.map((r) => r.tagId);
 }

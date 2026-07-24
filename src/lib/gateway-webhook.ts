@@ -8,7 +8,7 @@
  * gateway/server.mjs notifyWebhook() önce bu kaydı dener.
  */
 import { prisma } from "@/lib/db";
-import { applyAssignmentRules } from "@/lib/assignment";
+import { applyAssignmentRules, loadConversationTagIds } from "@/lib/assignment";
 import {
   anyAgentOnline,
   awayMessageRecentlySent,
@@ -251,12 +251,14 @@ export async function handleGatewayEvent(payload: any): Promise<GatewayWebhookRe
       },
     });
 
+    const tagIds = await loadConversationTagIds(conversation.id);
     const assignToId = await applyAssignmentRules({
       organizationId: channel.organizationId,
       channelId: channel.id,
       messageBody: payload.body,
       isNewConversation,
       currentAssignedToId: conversation.assignedToId,
+      tagIds,
     });
 
     if (assignToId) {
