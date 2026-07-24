@@ -4,6 +4,9 @@ import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 
 async function main() {
+  await prisma.intentSuggestion.deleteMany();
+  await prisma.apiKey.deleteMany();
+  await prisma.assignmentRule.deleteMany();
   await prisma.message.deleteMany();
   await prisma.conversationTag.deleteMany();
   await prisma.conversation.deleteMany();
@@ -21,8 +24,8 @@ async function main() {
     data: {
       name: "WASYS Demo",
       slug: "wasys-demo",
-      plan: "BASIC",
-      maxUsers: 5,
+      plan: "PRO",
+      maxUsers: 50,
     },
   });
 
@@ -224,8 +227,29 @@ async function main() {
     },
   });
 
+  await prisma.assignmentRule.createMany({
+    data: [
+      {
+        organizationId: org.id,
+        name: "Sipariş → Selin",
+        matchType: "KEYWORD",
+        matchValue: "sipariş",
+        assignToId: agent.id,
+        priority: 10,
+      },
+      {
+        organizationId: org.id,
+        name: "Yeni sohbet → round-robin",
+        matchType: "UNASSIGNED",
+        matchValue: null,
+        assignToId: null,
+        priority: 200,
+      },
+    ],
+  });
+
   console.log("Seed complete");
-  console.log("Login: demo@wasys.app / demo1234");
+  console.log("Login: demo@wasys.app / demo1234 (PRO demo)");
   console.log("Agent: agent@wasys.app / demo1234");
   console.log("Conversations:", conv1.id);
 }

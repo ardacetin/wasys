@@ -3,14 +3,17 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
-import { Inbox, MessageSquareText, Settings, Users, Radio } from "lucide-react";
+import { Inbox, MessageSquareText, Settings, Users, Radio, GitBranch, KeyRound, BarChart3 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const links = [
   { href: "/inbox", label: "Gelen kutusu", icon: Inbox },
+  { href: "/reports", label: "Raporlar", icon: BarChart3 },
   { href: "/settings/channels", label: "Kanallar", icon: Radio },
+  { href: "/settings/rules", label: "Atama kuralları", icon: GitBranch },
   { href: "/settings/templates", label: "Şablonlar", icon: MessageSquareText },
   { href: "/settings/team", label: "Ekip", icon: Users },
+  { href: "/settings/api", label: "API", icon: KeyRound },
   { href: "/settings/plan", label: "Paket", icon: Settings },
 ];
 

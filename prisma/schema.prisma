@@ -71,6 +71,8 @@ model Organization {
   tags          Tag[]
   templates     MessageTemplate[]
   quickButtons  QuickButton[]
+  assignmentRules AssignmentRule[]
+  apiKeys       ApiKey[]
 }
 
 model User {
@@ -88,6 +90,7 @@ model User {
 
   assignedConversations Conversation[] @relation("AssignedAgent")
   sentMessages          Message[]       @relation("SentBy")
+  assignmentRules       AssignmentRule[] @relation("RuleAssignee")
   accounts              Account[]
   sessions              Session[]
 }
@@ -185,6 +188,7 @@ model Conversation {
 
   messages Message[]
   tags     ConversationTag[]
+  intents  IntentSuggestion[]
 
   @@unique([channelId, contactId])
   @@index([organizationId, lastMessageAt])
@@ -252,4 +256,56 @@ model QuickButton {
   body           String
   sortOrder      Int      @default(0)
   createdAt      DateTime @default(now())
+}
+
+enum AssignmentMatchType {
+  KEYWORD
+  TAG
+  CHANNEL
+  UNASSIGNED
+}
+
+model AssignmentRule {
+  id             String              @id @default(cuid())
+  organizationId String
+  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  matchType      AssignmentMatchType
+  matchValue     String?
+  assignToId     String?
+  assignTo       User?               @relation("RuleAssignee", fields: [assignToId], references: [id])
+  priority       Int                 @default(100)
+  isActive       Boolean             @default(true)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  @@index([organizationId, priority])
+}
+
+model ApiKey {
+  id             String    @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  keyHash        String
+  keyPrefix      String
+  lastUsedAt     DateTime?
+  revokedAt      DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@index([keyPrefix])
+  @@index([organizationId])
+}
+
+model IntentSuggestion {
+  id             String   @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  intent         String
+  confidence     Float    @default(0.5)
+  summary        String?
+  suggestions    String?
+  createdAt      DateTime @default(now())
+
+  @@index([conversationId, createdAt])
 }

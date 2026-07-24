@@ -12,6 +12,8 @@ WhatsApp CRM — ortak gelen kutusu, QR ile WhatsApp bağlantısı (Baileys) ve 
 - WhatsApp **Cloud API** (ikincil)
 - Basic / Pro paket kapıları
 - Ekip yönetimi (Basic: 5 kullanıcı)
+- Atama kuralları ve raporlama (Faz 2)
+- Intent AI + Public API (Pro)
 
 ## Kurulum
 
@@ -65,8 +67,13 @@ Next.js (UI + API)  ←→  SQLite/Prisma
 Baileys Gateway (:4001)  ← QR / WhatsApp Web
 ```
 
-## Sonraki fazlar (Pro)
+## Sonraki fazlar
 
-- Intent AI, Zoho/Shopify, çağrı merkezi
-- Mobil uygulama (WapCRM)
-- Instagram DM
+- Çağrı merkezi, Zoho/Shopify, Instagram DM, mobil uygulama
+
+## Faz 2 (Pro çekirdek)
+
+- Atama kuralları (keyword / kanal / atanmamış + round-robin)
+- Intent AI (heuristic niyet analizi + önerilen yanıtlar, Pro)
+- Public REST API (`/api/v1/...` + API anahtarları, Pro)
+- Gerçek zamanlı raporlama paneli
