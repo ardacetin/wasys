@@ -18,14 +18,21 @@ function hasSessionCookie(req: NextRequest) {
 export function middleware(req: NextRequest) {
   const path = req.nextUrl.pathname;
   const isLoggedIn = hasSessionCookie(req);
-  const isAuthPage = path.startsWith("/login") || path.startsWith("/register");
+
+  // Bypass broken CDN-cached RSC on old App Router /login
+  if (path === "/login" || path === "/register") {
+    const target = path === "/login" ? "/giris" : "/kayit";
+    return NextResponse.redirect(new URL(target + req.nextUrl.search, req.url), 307);
+  }
+
+  const isAuthPage = path === "/giris" || path === "/kayit";
   const isProtected =
     path.startsWith("/inbox") ||
     path.startsWith("/settings") ||
     path.startsWith("/reports");
 
   if (isProtected && !isLoggedIn) {
-    return NextResponse.redirect(new URL("/login", req.url));
+    return NextResponse.redirect(new URL("/giris", req.url));
   }
 
   if (isAuthPage && isLoggedIn) {
@@ -36,5 +43,13 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/inbox/:path*", "/settings/:path*", "/reports/:path*", "/login", "/register"],
+  matcher: [
+    "/inbox/:path*",
+    "/settings/:path*",
+    "/reports/:path*",
+    "/login",
+    "/register",
+    "/giris",
+    "/kayit",
+  ],
 };

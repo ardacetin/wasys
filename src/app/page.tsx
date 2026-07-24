@@ -10,11 +10,11 @@ export default function HomePage() {
           WASYS
         </div>
         <nav className="flex items-center gap-3 text-sm">
-          <Link href="/login" className="rounded-full px-4 py-2 text-ink-muted hover:text-ink">
+          <Link href="/giris" className="rounded-full px-4 py-2 text-ink-muted hover:text-ink">
             Giriş
           </Link>
           <Link
-            href="/register"
+            href="/kayit"
             className="rounded-full bg-brand px-4 py-2 font-semibold text-white shadow-sm transition hover:bg-brand-deep"
           >
             Başla
@@ -36,13 +36,13 @@ export default function HomePage() {
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
             <Link
-              href="/register"
+              href="/kayit"
               className="rounded-full bg-ink px-6 py-3 text-sm font-semibold text-bg-elevated transition hover:bg-brand-deep"
             >
               Ücretsiz dene
             </Link>
             <Link
-              href="/login"
+              href="/giris"
               className="rounded-full border border-line bg-bg-elevated/80 px-6 py-3 text-sm font-semibold backdrop-blur"
             >
               Demo giriş
