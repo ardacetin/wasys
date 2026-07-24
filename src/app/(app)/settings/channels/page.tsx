@@ -12,6 +12,14 @@ type Channel = {
   lastError: string | null;
 };
 
+const STATUS_LABELS: Record<string, string> = {
+  CONNECTING: "Bağlanıyor…",
+  QR_PENDING: "QR bekleniyor",
+  CONNECTED: "Bağlı",
+  DISCONNECTED: "Bağlı değil",
+  ERROR: "Hata",
+};
+
 export default function ChannelsPage() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [loadingId, setLoadingId] = useState<string | null>(null);
@@ -63,6 +71,17 @@ export default function ChannelsPage() {
     void load();
   }
 
+  async function disconnectQr(id: string) {
+    if (!confirm("WhatsApp bağlantısı kesilsin mi? Yeniden bağlanmak için tekrar QR taramanız gerekir.")) return;
+    setLoadingId(id);
+    const res = await fetch(`/api/channels/${id}/connect`, { method: "DELETE" });
+    const data = await res.json();
+    setLoadingId(null);
+    if (data.channel) {
+      setChannels((prev) => prev.map((c) => (c.id === id ? data.channel : c)));
+    }
+  }
+
   async function addQrChannel() {
     const res = await fetch("/api/channels", {
       method: "POST",
@@ -110,7 +129,7 @@ export default function ChannelsPage() {
                 <div className="font-semibold">{channel.name}</div>
                 <div className="mt-1 text-xs text-ink-muted">
                   {channel.type === "WHATSAPP_QR" ? "WhatsApp QR" : "WhatsApp Cloud API"} ·{" "}
-                  {channel.status}
+                  {STATUS_LABELS[channel.status] ?? channel.status}
                   {channel.phoneNumber ? ` · ${channel.phoneNumber}` : ""}
                 </div>
                 {channel.lastError ? (
@@ -118,13 +137,23 @@ export default function ChannelsPage() {
                 ) : null}
               </div>
               {channel.type === "WHATSAPP_QR" ? (
-                <button
-                  onClick={() => void connectQr(channel.id)}
-                  disabled={loadingId === channel.id}
-                  className="rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-deep disabled:opacity-60"
-                >
-                  {loadingId === channel.id ? "Bağlanıyor..." : "QR ile bağlan"}
-                </button>
+                channel.status === "CONNECTED" ? (
+                  <button
+                    onClick={() => void disconnectQr(channel.id)}
+                    disabled={loadingId === channel.id}
+                    className="rounded-xl border border-line bg-white px-4 py-2 text-sm font-semibold text-danger hover:bg-red-50 disabled:opacity-60"
+                  >
+                    Bağlantıyı kes
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => void connectQr(channel.id)}
+                    disabled={loadingId === channel.id}
+                    className="rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-deep disabled:opacity-60"
+                  >
+                    {loadingId === channel.id ? "Bağlanıyor..." : "QR ile bağlan"}
+                  </button>
+                )
               ) : (
                 <span className="rounded-full bg-brand-soft px-3 py-1 text-xs font-medium text-brand-deep">
                   Webhook: /api/webhooks/meta
@@ -133,12 +162,24 @@ export default function ChannelsPage() {
             </div>
 
             {channel.qrData && channel.status !== "CONNECTED" ? (
-              <div className="mt-5 flex flex-col items-center gap-3 rounded-xl border border-dashed border-line bg-white p-6">
+              <div className="mt-5 flex flex-col items-center gap-4 rounded-xl border border-dashed border-line bg-white p-6 md:flex-row md:items-start md:justify-center md:gap-8">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={channel.qrData} alt="WhatsApp QR" className="h-56 w-56" />
-                <p className="text-center text-sm text-ink-muted">
-                  WhatsApp → Bağlı Cihazlar → Cihaz Bağla ile bu kodu tarayın.
-                </p>
+                <img src={channel.qrData} alt="WhatsApp QR" className="h-56 w-56 shrink-0" />
+                <ol className="max-w-xs list-decimal space-y-2 pl-5 text-sm text-ink-muted md:pt-4">
+                  <li>Telefonunuzda <strong>WhatsApp</strong>’ı açın</li>
+                  <li><strong>Ayarlar → Bağlı Cihazlar</strong>’a gidin</li>
+                  <li><strong>Cihaz Bağla</strong>’ya dokunun</li>
+                  <li>Telefonunuzu bu ekrana doğrultup kodu tarayın</li>
+                </ol>
+              </div>
+            ) : null}
+
+            {channel.type === "WHATSAPP_QR" &&
+            channel.status === "CONNECTING" &&
+            !channel.qrData ? (
+              <div className="mt-5 flex flex-col items-center gap-2 rounded-xl border border-dashed border-line bg-white p-8">
+                <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand border-t-transparent" />
+                <p className="text-sm text-ink-muted">QR kod hazırlanıyor…</p>
               </div>
             ) : null}
 

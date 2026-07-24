@@ -1,45 +1,93 @@
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
-import { makeWASocket, useMultiFileAuthState, DisconnectReason, downloadMediaMessage } from "@whiskeysockets/baileys";
-import type { WASocket, WAMessage } from "@whiskeysockets/baileys";
+import {
+  makeWASocket,
+  useMultiFileAuthState,
+  fetchLatestBaileysVersion,
+  DisconnectReason,
+  downloadMediaMessage,
+} from "@whiskeysockets/baileys";
 import qrcode from "qrcode";
 import pino from "pino";
 
 const PORT = Number(process.env.GATEWAY_PORT ?? 4001);
 const SECRET = process.env.GATEWAY_SECRET ?? "wasys-gateway-secret";
-const AUTH_ROOT = path.join(process.cwd(), "gateway-auth");
+// Persistent dir (survives redeploys) — same place as the SQLite DB.
+const DATA_ROOT = process.env.GATEWAY_DATA_DIR ?? path.join(process.cwd(), "data");
+const AUTH_ROOT = path.join(DATA_ROOT, "gateway-auth");
+const REGISTRY_FILE = path.join(DATA_ROOT, "gateway-sessions.json");
 const logger = pino({ level: "info" });
 
-type SessionState = {
-  channelId: string;
-  sessionId: string;
-  webhookUrl: string;
-  status: "CONNECTING" | "QR_PENDING" | "CONNECTED" | "DISCONNECTED" | "ERROR";
-  qrDataUrl?: string;
-  phoneNumber?: string;
-  lastError?: string;
-  sock?: WASocket;
-};
+/**
+ * @typedef {Object} SessionState
+ * @property {string} channelId
+ * @property {string} sessionId
+ * @property {string} webhookUrl
+ * @property {"CONNECTING"|"QR_PENDING"|"CONNECTED"|"DISCONNECTED"|"ERROR"} status
+ * @property {string=} qrDataUrl
+ * @property {string=} phoneNumber
+ * @property {string=} lastError
+ * @property {import("@whiskeysockets/baileys").WASocket=} sock
+ */
 
-const sessions = new Map<string, SessionState>();
+/** @type {Map<string, SessionState>} */
+const sessions = new Map();
 
 function ensureAuthDir() {
   if (!fs.existsSync(AUTH_ROOT)) fs.mkdirSync(AUTH_ROOT, { recursive: true });
 }
 
-function json(res: http.ServerResponse, status: number, body: unknown) {
+function saveRegistry() {
+  try {
+    const entries = [...sessions.values()].map((s) => ({
+      channelId: s.channelId,
+      sessionId: s.sessionId,
+      webhookUrl: s.webhookUrl,
+    }));
+    fs.mkdirSync(DATA_ROOT, { recursive: true });
+    fs.writeFileSync(REGISTRY_FILE, JSON.stringify(entries, null, 2));
+  } catch (err) {
+    logger.warn({ err }, "failed to persist session registry");
+  }
+}
+
+function resumeSessions() {
+  if (!fs.existsSync(REGISTRY_FILE)) return;
+  try {
+    const entries = JSON.parse(fs.readFileSync(REGISTRY_FILE, "utf8"));
+    for (const entry of entries) {
+      if (!entry?.sessionId || sessions.has(entry.sessionId)) continue;
+      const authDir = path.join(AUTH_ROOT, entry.sessionId);
+      // Only resume sessions that were actually paired before.
+      if (!fs.existsSync(path.join(authDir, "creds.json"))) continue;
+      const session = {
+        channelId: entry.channelId,
+        sessionId: entry.sessionId,
+        webhookUrl: entry.webhookUrl,
+        status: "CONNECTING",
+      };
+      sessions.set(entry.sessionId, session);
+      logger.info({ sessionId: entry.sessionId }, "resuming WhatsApp session");
+      void startSocket(session);
+    }
+  } catch (err) {
+    logger.warn({ err }, "failed to resume sessions");
+  }
+}
+
+function json(res, status, body) {
   res.writeHead(status, { "Content-Type": "application/json" });
   res.end(JSON.stringify(body));
 }
 
-function unauthorized(res: http.ServerResponse) {
+function unauthorized(res) {
   json(res, 401, { error: "Unauthorized" });
 }
 
-function readBody(req: http.IncomingMessage): Promise<any> {
+function readBody(req) {
   return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
+    const chunks = [];
     req.on("data", (c) => chunks.push(c));
     req.on("end", () => {
       try {
@@ -53,7 +101,7 @@ function readBody(req: http.IncomingMessage): Promise<any> {
   });
 }
 
-async function notifyWebhook(session: SessionState, event: string, payload: Record<string, unknown>) {
+async function notifyWebhook(session, event, payload) {
   try {
     await fetch(session.webhookUrl, {
       method: "POST",
@@ -61,18 +109,23 @@ async function notifyWebhook(session: SessionState, event: string, payload: Reco
         "Content-Type": "application/json",
         "x-gateway-secret": SECRET,
       },
-      body: JSON.stringify({ event, sessionId: session.sessionId, channelId: session.channelId, ...payload }),
+      body: JSON.stringify({
+        event,
+        sessionId: session.sessionId,
+        channelId: session.channelId,
+        ...payload,
+      }),
     });
   } catch (err) {
     logger.error({ err, sessionId: session.sessionId }, "webhook failed");
   }
 }
 
-function jidToPhone(jid: string) {
+function jidToPhone(jid) {
   return jid.split("@")[0]?.split(":")[0] ?? jid;
 }
 
-async function startSocket(session: SessionState) {
+async function startSocket(session) {
   ensureAuthDir();
   const authDir = path.join(AUTH_ROOT, session.sessionId);
   const { state, saveCreds } = await useMultiFileAuthState(authDir);
@@ -80,8 +133,19 @@ async function startSocket(session: SessionState) {
   session.status = "CONNECTING";
   session.lastError = undefined;
 
+  // WhatsApp rejects outdated protocol versions with a 405 — always fetch latest.
+  let waVersion;
+  try {
+    const { version } = await fetchLatestBaileysVersion();
+    waVersion = version;
+  } catch {
+    waVersion = undefined;
+  }
+
   const sock = makeWASocket({
+    version: waVersion,
     auth: state,
+    browser: ["WASYS", "Chrome", "1.0.0"],
     logger: pino({ level: "silent" }),
     printQRInTerminal: false,
     syncFullHistory: false,
@@ -97,14 +161,18 @@ async function startSocket(session: SessionState) {
 
     if (qr) {
       session.status = "QR_PENDING";
-      session.qrDataUrl = await qrcode.toDataURL(qr);
-      await notifyWebhook(session, "qr", { qrDataUrl: session.qrDataUrl, status: session.status });
+      session.qrDataUrl = await qrcode.toDataURL(qr, { margin: 1, width: 320 });
+      await notifyWebhook(session, "qr", {
+        qrDataUrl: session.qrDataUrl,
+        status: session.status,
+      });
     }
 
     if (connection === "open") {
       session.status = "CONNECTED";
       session.qrDataUrl = undefined;
       session.phoneNumber = sock.user?.id ? jidToPhone(sock.user.id) : undefined;
+      saveRegistry();
       await notifyWebhook(session, "connected", {
         status: session.status,
         phoneNumber: session.phoneNumber,
@@ -112,18 +180,25 @@ async function startSocket(session: SessionState) {
     }
 
     if (connection === "close") {
-      const code = (lastDisconnect?.error as { output?: { statusCode?: number } })?.output?.statusCode;
-      const shouldReconnect = code !== DisconnectReason.loggedOut;
+      const code = lastDisconnect?.error?.output?.statusCode;
+      const loggedOut = code === DisconnectReason.loggedOut;
       session.status = "DISCONNECTED";
       session.qrDataUrl = undefined;
 
       await notifyWebhook(session, "disconnected", {
         status: session.status,
         code,
-        shouldReconnect,
+        shouldReconnect: !loggedOut,
       });
 
-      if (shouldReconnect) {
+      if (loggedOut) {
+        // Phone unlinked this device — wipe creds so a new QR can be issued.
+        try {
+          fs.rmSync(authDir, { recursive: true, force: true });
+        } catch {}
+        sessions.delete(session.sessionId);
+        saveRegistry();
+      } else {
         setTimeout(() => {
           void startSocket(session);
         }, 2000);
@@ -153,7 +228,7 @@ async function startSocket(session: SessionState) {
   });
 }
 
-async function handleIncoming(session: SessionState, msg: WAMessage) {
+async function handleIncoming(session, msg) {
   if (msg.key.fromMe) return;
   const remoteJid = msg.key.remoteJid;
   if (!remoteJid || remoteJid.endsWith("@g.us") || remoteJid === "status@broadcast") return;
@@ -162,10 +237,10 @@ async function handleIncoming(session: SessionState, msg: WAMessage) {
   const pushName = msg.pushName ?? undefined;
   const externalId = msg.key.id ?? undefined;
 
-  let type: "TEXT" | "AUDIO" | "IMAGE" | "VIDEO" | "DOCUMENT" = "TEXT";
-  let body: string | undefined;
-  let mediaUrl: string | undefined;
-  let mediaMimeType: string | undefined;
+  let type = "TEXT";
+  let body;
+  let mediaUrl;
+  let mediaMimeType;
 
   if (msg.message?.conversation) {
     body = msg.message.conversation;
@@ -180,7 +255,7 @@ async function handleIncoming(session: SessionState, msg: WAMessage) {
       const mediaDir = path.join(process.cwd(), "public", "uploads", "audio");
       fs.mkdirSync(mediaDir, { recursive: true });
       const filename = `${externalId ?? Date.now()}.ogg`;
-      fs.writeFileSync(path.join(mediaDir, filename), buffer as Buffer);
+      fs.writeFileSync(path.join(mediaDir, filename), buffer);
       mediaUrl = `/uploads/audio/${filename}`;
     } catch (err) {
       logger.warn({ err }, "audio download failed");
@@ -208,7 +283,7 @@ async function handleIncoming(session: SessionState, msg: WAMessage) {
   });
 }
 
-async function sendText(sessionId: string, to: string, text: string) {
+async function sendText(sessionId, to, text) {
   const session = sessions.get(sessionId);
   if (!session?.sock || session.status !== "CONNECTED") {
     throw new Error("Session not connected");
@@ -218,7 +293,7 @@ async function sendText(sessionId: string, to: string, text: string) {
   return { externalId: result?.key?.id };
 }
 
-async function sendAudio(sessionId: string, to: string, audioUrl: string, ptt = true) {
+async function sendAudio(sessionId, to, audioUrl, ptt = true) {
   const session = sessions.get(sessionId);
   if (!session?.sock || session.status !== "CONNECTED") {
     throw new Error("Session not connected");
@@ -262,9 +337,18 @@ const server = http.createServer(async (req, res) => {
         session.channelId = channelId;
         session.webhookUrl = webhookUrl;
       }
+      saveRegistry();
 
-      void startSocket(session);
-      return json(res, 200, { ok: true, status: session.status, qrDataUrl: session.qrDataUrl });
+      // Already connected? Don't restart the socket.
+      if (session.status !== "CONNECTED" || !session.sock) {
+        void startSocket(session);
+      }
+      return json(res, 200, {
+        ok: true,
+        status: session.status,
+        qrDataUrl: session.qrDataUrl,
+        phoneNumber: session.phoneNumber,
+      });
     }
 
     const statusMatch = url.pathname.match(/^\/sessions\/([^/]+)\/status$/);
@@ -286,7 +370,12 @@ const server = http.createServer(async (req, res) => {
         await session.sock.logout().catch(() => undefined);
         session.sock.end(undefined);
       }
+      const authDir = path.join(AUTH_ROOT, stopMatch[1]);
+      try {
+        fs.rmSync(authDir, { recursive: true, force: true });
+      } catch {}
       sessions.delete(stopMatch[1]);
+      saveRegistry();
       return json(res, 200, { ok: true });
     }
 
@@ -309,7 +398,26 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-ensureAuthDir();
-server.listen(PORT, () => {
-  logger.info(`WASYS WhatsApp gateway listening on :${PORT}`);
-});
+export function startGateway() {
+  ensureAuthDir();
+  return new Promise((resolve) => {
+    server.on("error", (err) => {
+      if (err.code === "EADDRINUSE") {
+        logger.warn(`Gateway port ${PORT} already in use — assuming gateway is running`);
+        resolve(false);
+      } else {
+        logger.error({ err }, "gateway server error");
+      }
+    });
+    server.listen(PORT, "127.0.0.1", () => {
+      logger.info(`WASYS WhatsApp gateway listening on 127.0.0.1:${PORT}`);
+      resumeSessions();
+      resolve(true);
+    });
+  });
+}
+
+// Standalone: `node gateway/server.mjs`
+if (process.argv[1] && process.argv[1].endsWith("server.mjs")) {
+  void startGateway();
+}

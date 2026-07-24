@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "dev:gateway": "tsx gateway/server.ts",
+    "dev:gateway": "node gateway/server.mjs",
     "dev:all": "npm run dev & npm run dev:gateway",
     "build": "node prisma/run-production.mjs build",
     "start": "node server.js",
