@@ -43,8 +43,8 @@ export function AppShell({
   const pathname = usePathname();
   const visibleLinks = isPlatformAdmin
     ? [
-        ...links,
         { href: "/admin/accounts", label: "Müşteri hesapları", icon: Building2 },
+        ...links,
       ]
     : links;
 

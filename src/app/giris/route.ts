@@ -80,7 +80,7 @@ const HTML = `<!DOCTYPE html>
             csrfToken: csrfData.csrfToken,
             email: String(fd.get('email') || ''),
             password: String(fd.get('password') || ''),
-            callbackUrl: '/inbox',
+            callbackUrl: '/panel',
             json: 'true'
           });
           var res = await fetch('/api/auth/callback/credentials', {

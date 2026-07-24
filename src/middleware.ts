@@ -36,7 +36,7 @@ export function middleware(req: NextRequest) {
   }
 
   if (isAuthPage && isLoggedIn) {
-    return NextResponse.redirect(new URL("/inbox", req.url));
+    return NextResponse.redirect(new URL("/panel", req.url));
   }
 
   return NextResponse.next();
