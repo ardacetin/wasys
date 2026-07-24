@@ -1,12 +1,30 @@
 import { PrismaClient } from "@prisma/client";
-import { accessSync, closeSync, constants, mkdirSync, openSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import {
+  accessSync,
+  closeSync,
+  constants,
+  existsSync,
+  mkdirSync,
+  openSync,
+  statSync,
+} from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
+
+const globalForPrisma = globalThis as unknown as {
+  prisma?: PrismaClient;
+  __wasysSqliteReady?: boolean;
+  __wasysSchemaReady?: boolean;
+};
 
 /**
  * Hostinger often sets DATABASE_URL to a path outside nodejs/ that is not writable
  * (SQLite Error 14). Normalize to a writable file URL before Prisma connects.
  */
 function ensureSqliteDatabaseUrl() {
+  if (globalForPrisma.__wasysSqliteReady) return;
+  globalForPrisma.__wasysSqliteReady = true;
+
   const configured = process.env.DATABASE_URL?.trim();
   if (!configured?.startsWith("file:")) return;
 
@@ -51,9 +69,81 @@ function ensureSqliteDatabaseUrl() {
   }
 }
 
-ensureSqliteDatabaseUrl();
+/**
+ * Empty SQLite files (0 bytes) happen when the path is created but `db push` never ran.
+ * Hostinger entry may not be server.js — push schema on first runtime import.
+ */
+function ensureSchemaAndBootstrap() {
+  if (globalForPrisma.__wasysSchemaReady) return;
+  globalForPrisma.__wasysSchemaReady = true;
 
-const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
+  if (process.env.WASYS_SKIP_DB_PUSH === "1") return;
+
+  const databaseUrl = process.env.DATABASE_URL?.trim();
+  if (!databaseUrl?.startsWith("file:")) return;
+
+  const raw = decodeURIComponent(databaseUrl.slice("file:".length).split("?")[0]);
+  const databasePath = raw.replace(/^\/\/\//, "/").replace(/^\/\/[^/]*/, "");
+  const fileBytes = existsSync(databasePath) ? statSync(databasePath).size : 0;
+
+  const prismaCli = resolve(process.cwd(), "node_modules/prisma/build/index.js");
+  if (!existsSync(prismaCli)) {
+    console.error("[WASYS DB] prisma CLI missing — cannot create tables");
+    return;
+  }
+
+  const nodeDir = dirname(process.execPath);
+  const env = {
+    ...process.env,
+    PATH: `${nodeDir}${process.env.PATH ? `:${process.env.PATH}` : ""}`,
+  };
+
+  // Always push when DB is empty/tiny; otherwise push is cheap when already in sync.
+  if (fileBytes < 1024 || process.env.WASYS_FORCE_DB_PUSH === "1") {
+    console.log(`[WASYS DB] Running prisma db push (fileBytes=${fileBytes})`);
+  } else {
+    console.log("[WASYS DB] Ensuring schema is up to date");
+  }
+
+  const push = spawnSync(
+    process.execPath,
+    [prismaCli, "db", "push", "--skip-generate"],
+    {
+      cwd: process.cwd(),
+      env,
+      encoding: "utf8",
+    },
+  );
+
+  if (push.status !== 0) {
+    console.error(
+      "[WASYS DB] prisma db push failed",
+      (push.stderr || push.stdout || "").slice(0, 1000),
+    );
+    return;
+  }
+
+  const bootstrap = resolve(process.cwd(), "prisma/bootstrap.mjs");
+  if (!existsSync(bootstrap)) return;
+
+  const boot = spawnSync(process.execPath, [bootstrap], {
+    cwd: process.cwd(),
+    env,
+    encoding: "utf8",
+  });
+
+  if (boot.status !== 0) {
+    console.error(
+      "[WASYS DB] bootstrap failed",
+      (boot.stderr || boot.stdout || "").slice(0, 1000),
+    );
+  } else {
+    console.log("[WASYS DB] schema + bootstrap ready");
+  }
+}
+
+ensureSqliteDatabaseUrl();
+ensureSchemaAndBootstrap();
 
 export const prisma =
   globalForPrisma.prisma ??

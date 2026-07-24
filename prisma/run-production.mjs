@@ -27,6 +27,14 @@ function bin(name) {
   return local;
 }
 
+function prismaCli() {
+  const cli = resolve(projectRoot, "node_modules/prisma/build/index.js");
+  if (!existsSync(cli)) {
+    throw new Error(`Missing ${cli}. Run npm install in the Hostinger panel build first.`);
+  }
+  return cli;
+}
+
 function run(command, args) {
   const result = spawnSync(command, args, {
     cwd: projectRoot,
@@ -47,10 +55,10 @@ function run(command, args) {
 run(process.execPath, [resolve(projectRoot, "prisma/prepare-db.mjs")]);
 
 if (mode === "build") {
-  run(bin("prisma"), ["generate"]);
+  run(process.execPath, [prismaCli(), "generate"]);
 }
 
-run(bin("prisma"), ["db", "push"]);
+run(process.execPath, [prismaCli(), "db", "push"]);
 run(process.execPath, [resolve(projectRoot, "prisma/bootstrap.mjs")]);
 
 if (mode === "build") {
