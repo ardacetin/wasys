@@ -9,12 +9,15 @@ const credentialsSchema = z.object({
   password: z.string().min(6),
 });
 
-const authSecret = process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET;
+// Hostinger: prefer process env; Next also auto-loads `.env` / `.env.production` from app root
+const authSecret =
+  process.env.AUTH_SECRET?.trim() ||
+  process.env.NEXTAUTH_SECRET?.trim() ||
+  undefined;
 
 if (!authSecret) {
   console.error(
-    "[WASYS Auth] AUTH_SECRET (or NEXTAUTH_SECRET) is missing. " +
-      "Set it in the hosting environment — Auth.js will return Configuration error otherwise.",
+    "[WASYS Auth] MissingSecret — create `.env` in Hostinger nodejs/ folder. See HOSTINGER.md",
   );
 }
 
@@ -34,27 +37,37 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         password: { label: "Password", type: "password" },
       },
       async authorize(raw) {
+        if (!authSecret) {
+          console.error("[WASYS Auth] authorize blocked: AUTH_SECRET missing");
+          return null;
+        }
+
         const parsed = credentialsSchema.safeParse(raw);
         if (!parsed.success) return null;
 
-        const user = await prisma.user.findUnique({
-          where: { email: parsed.data.email.toLowerCase() },
-          include: { organization: true },
-        });
-        if (!user) return null;
+        try {
+          const user = await prisma.user.findUnique({
+            where: { email: parsed.data.email.toLowerCase() },
+            include: { organization: true },
+          });
+          if (!user) return null;
 
-        const valid = await compare(parsed.data.password, user.passwordHash);
-        if (!valid) return null;
+          const valid = await compare(parsed.data.password, user.passwordHash);
+          if (!valid) return null;
 
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          role: user.role,
-          organizationId: user.organizationId,
-          plan: user.organization.plan,
-          organizationName: user.organization.name,
-        };
+          return {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            role: user.role,
+            organizationId: user.organizationId,
+            plan: user.organization.plan,
+            organizationName: user.organization.name,
+          };
+        } catch (err) {
+          console.error("[WASYS Auth] authorize DB error", err);
+          return null;
+        }
       },
     }),
   ],
