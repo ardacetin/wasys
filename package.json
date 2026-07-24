@@ -7,7 +7,7 @@
     "dev:gateway": "tsx gateway/server.ts",
     "dev:all": "npm run dev & npm run dev:gateway",
     "build": "node prisma/run-production.mjs build",
-    "start": "node prisma/run-production.mjs start",
+    "start": "node server.js",
     "lint": "eslint",
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
