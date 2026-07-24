@@ -48,6 +48,8 @@ export async function GET() {
       authUrlHint: authUrl ? authUrl.replace(/^(https?:\/\/[^/]+).*/, "$1") : null,
       hint: !hasAuthSecret
         ? "Create a .env file in the Hostinger nodejs/ folder with AUTH_SECRET=... then Restart the app."
+        : !databaseConnected
+          ? "DATABASE_URL için file:./prod.db kullanın ve npm run db:bootstrap çalıştırın."
         : undefined,
     },
     { status: ok ? 200 : 503 },
