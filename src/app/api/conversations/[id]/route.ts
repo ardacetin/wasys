@@ -28,13 +28,17 @@ export async function GET(
       channel: true,
       assignedTo: { select: { id: true, name: true, email: true } },
       tags: { include: { tag: true } },
-      messages: { orderBy: { createdAt: "asc" }, take: 200 },
+      // En yeni 200 mesajı al (uzun sohbetlerde son mesajlar kaybolmasın),
+      // sonra ekranda kronolojik göstermek için ters çevir.
+      messages: { orderBy: { createdAt: "desc" }, take: 200 },
     },
   });
 
   if (!conversation) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
+
+  conversation.messages.reverse();
 
   if (conversation.unreadCount > 0) {
     await prisma.conversation.update({
