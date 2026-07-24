@@ -29,6 +29,7 @@ export function middleware(req: NextRequest) {
   const isProtected =
     path.startsWith("/admin") ||
     path.startsWith("/inbox") ||
+    path.startsWith("/crm") ||
     path.startsWith("/settings") ||
     path.startsWith("/reports");
 
@@ -46,6 +47,7 @@ export function middleware(req: NextRequest) {
 export const config = {
   matcher: [
     "/inbox/:path*",
+    "/crm/:path*",
     "/admin/:path*",
     "/settings/:path*",
     "/reports/:path*",

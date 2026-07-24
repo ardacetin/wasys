@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
 import {
   BarChart3,
+  BookUser,
   Building2,
   GitBranch,
   Inbox,
@@ -19,6 +20,7 @@ import { cn } from "@/lib/utils";
 
 const links = [
   { href: "/inbox", label: "Gelen kutusu", icon: Inbox },
+  { href: "/crm", label: "CRM", icon: BookUser },
   { href: "/reports", label: "Raporlar", icon: BarChart3 },
   { href: "/settings/channels", label: "Kanallar", icon: Radio },
   { href: "/settings/rules", label: "Atama kuralları", icon: GitBranch },

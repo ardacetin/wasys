@@ -93,9 +93,23 @@ CREATE TABLE "Contact" (
     "email" TEXT,
     "avatarUrl" TEXT,
     "notes" TEXT,
+    "company" TEXT,
+    "crmStage" TEXT NOT NULL DEFAULT 'LEAD',
+    "dealValue" REAL,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
     CONSTRAINT "Contact_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "ContactNote" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "contactId" TEXT NOT NULL,
+    "authorId" TEXT,
+    "body" TEXT NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "ContactNote_contactId_fkey" FOREIGN KEY ("contactId") REFERENCES "Contact" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "ContactNote_authorId_fkey" FOREIGN KEY ("authorId") REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
 -- CreateTable
@@ -259,7 +273,13 @@ CREATE UNIQUE INDEX "Channel_sessionId_key" ON "Channel"("sessionId");
 CREATE INDEX "Contact_organizationId_name_idx" ON "Contact"("organizationId", "name");
 
 -- CreateIndex
+CREATE INDEX "Contact_organizationId_crmStage_idx" ON "Contact"("organizationId", "crmStage");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "Contact_organizationId_phone_key" ON "Contact"("organizationId", "phone");
+
+-- CreateIndex
+CREATE INDEX "ContactNote_contactId_createdAt_idx" ON "ContactNote"("contactId", "createdAt");
 
 -- CreateIndex
 CREATE INDEX "Conversation_organizationId_lastMessageAt_idx" ON "Conversation"("organizationId", "lastMessageAt");

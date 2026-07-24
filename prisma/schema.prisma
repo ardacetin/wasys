@@ -24,6 +24,14 @@ enum DistributionMode {
   RANDOM
 }
 
+enum CrmStage {
+  LEAD
+  CONTACTED
+  PROPOSAL
+  WON
+  LOST
+}
+
 enum ChannelType {
   WHATSAPP_QR
   WHATSAPP_CLOUD
@@ -106,6 +114,7 @@ model User {
   assignedConversations Conversation[] @relation("AssignedAgent")
   sentMessages          Message[]       @relation("SentBy")
   assignmentRules       AssignmentRule[] @relation("RuleAssignee")
+  contactNotes          ContactNote[]   @relation("NoteAuthor")
   accounts              Account[]
   sessions              Session[]
 }
@@ -174,13 +183,30 @@ model Contact {
   email          String?
   avatarUrl      String?
   notes          String?
+  company        String?
+  crmStage       CrmStage @default(LEAD)
+  dealValue      Float?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
   conversations Conversation[]
+  crmNotes      ContactNote[]
 
   @@unique([organizationId, phone])
   @@index([organizationId, name])
+  @@index([organizationId, crmStage])
+}
+
+model ContactNote {
+  id        String   @id @default(cuid())
+  contactId String
+  contact   Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  authorId  String?
+  author    User?    @relation("NoteAuthor", fields: [authorId], references: [id])
+  body      String
+  createdAt DateTime @default(now())
+
+  @@index([contactId, createdAt])
 }
 
 model Conversation {

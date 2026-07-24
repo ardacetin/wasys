@@ -58,7 +58,11 @@ function StatusTicks({ status }: { status: string }) {
 
 export default function InboxPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(() => {
+    // CRM ve diğer sayfalardan ?conversation=<id> ile doğrudan sohbet açma
+    if (typeof window === "undefined") return null;
+    return new URLSearchParams(window.location.search).get("conversation");
+  });
   const [messages, setMessages] = useState<Message[]>([]);
   const [selected, setSelected] = useState<Conversation | null>(null);
   const [tags, setTags] = useState<Tag[]>([]);
