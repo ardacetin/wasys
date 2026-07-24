@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 type Granularity = "hour" | "day" | "week" | "month";
-type Preset = "today" | "7d" | "30d" | "month";
+type Preset = "today" | "yesterday" | "7d" | "30d" | "month";
 
 type Report = {
   generatedAt: string;
@@ -36,6 +36,7 @@ const GRANULARITY_OPTIONS: { value: Granularity; label: string }[] = [
 
 const PRESET_OPTIONS: { value: Preset; label: string }[] = [
   { value: "today", label: "Bugün" },
+  { value: "yesterday", label: "Dün" },
   { value: "7d", label: "Son 7 gün" },
   { value: "30d", label: "Son 30 gün" },
   { value: "month", label: "Bu ay" },
@@ -54,6 +55,13 @@ function presetRange(preset: Preset): { from: Date; to: Date } {
   switch (preset) {
     case "today":
       return { from: startOfToday, to: now };
+    case "yesterday": {
+      const from = new Date(startOfToday);
+      from.setDate(from.getDate() - 1);
+      const to = new Date(startOfToday);
+      to.setMilliseconds(-1);
+      return { from, to };
+    }
     case "7d": {
       const from = new Date(startOfToday);
       from.setDate(from.getDate() - 6);
@@ -219,7 +227,7 @@ export default function ReportsPage() {
   function selectPreset(next: Preset) {
     setPreset(next);
     // Sensible default granularity for each range
-    if (next === "today") setGranularity("hour");
+    if (next === "today" || next === "yesterday") setGranularity("hour");
     else if (granularity === "hour") setGranularity("day");
   }
 
