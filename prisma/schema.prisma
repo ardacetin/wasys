@@ -18,6 +18,12 @@ enum UserRole {
   AGENT
 }
 
+enum DistributionMode {
+  NONE
+  BALANCED
+  RANDOM
+}
+
 enum ChannelType {
   WHATSAPP_QR
   WHATSAPP_CLOUD
@@ -64,6 +70,14 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Otomasyon ayarları
+  welcomeMessageEnabled Boolean          @default(false)
+  welcomeMessage        String?
+  awayMessageEnabled    Boolean          @default(false)
+  awayMessage           String?
+  distributionMode      DistributionMode @default(NONE)
+  alertEmail            String?
+
   users         User[]
   channels      Channel[]
   contacts      Contact[]
@@ -85,6 +99,7 @@ model User {
   avatarUrl      String?
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  lastActiveAt   DateTime?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 

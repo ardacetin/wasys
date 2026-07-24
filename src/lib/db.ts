@@ -1,20 +1,19 @@
 import { PrismaClient } from "@prisma/client";
-import { spawnSync } from "node:child_process";
+import { hash } from "bcryptjs";
 import {
   accessSync,
   closeSync,
   constants,
-  existsSync,
   mkdirSync,
   openSync,
-  statSync,
+  readFileSync,
 } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 
 const globalForPrisma = globalThis as unknown as {
   prisma?: PrismaClient;
   __wasysSqliteReady?: boolean;
-  __wasysSchemaReady?: boolean;
+  __wasysSelfHeal?: Promise<boolean> | null;
 };
 
 /**
@@ -69,98 +68,7 @@ function ensureSqliteDatabaseUrl() {
   }
 }
 
-/**
- * Empty SQLite files (0 bytes) happen when the path is created but `db push` never ran.
- * Hostinger entry may not be server.js — push schema on first runtime import.
- */
-function ensureSchemaAndBootstrap() {
-  if (globalForPrisma.__wasysSchemaReady) return;
-  globalForPrisma.__wasysSchemaReady = true;
-
-  if (process.env.WASYS_SKIP_DB_PUSH === "1") return;
-
-  const databaseUrl = process.env.DATABASE_URL?.trim();
-  if (!databaseUrl?.startsWith("file:")) return;
-
-  const raw = decodeURIComponent(databaseUrl.slice("file:".length).split("?")[0]);
-  const databasePath = raw.replace(/^\/\/\//, "/").replace(/^\/\/[^/]*/, "");
-  const fileBytes = existsSync(databasePath) ? statSync(databasePath).size : 0;
-
-  const nodeDir = dirname(process.execPath);
-  const env = {
-    ...process.env,
-    PATH: `${nodeDir}${process.env.PATH ? `:${process.env.PATH}` : ""}`,
-  };
-
-  const prismaCli = resolve(process.cwd(), "node_modules/prisma/build/index.js");
-  const applyInitSql = resolve(process.cwd(), "prisma/apply-init-sql.mjs");
-
-  console.log(`[WASYS DB] Ensuring schema (fileBytes=${fileBytes})`);
-
-  let schemaApplied = false;
-
-  if (existsSync(prismaCli)) {
-    const push = spawnSync(
-      process.execPath,
-      [prismaCli, "db", "push", "--skip-generate"],
-      { cwd: process.cwd(), env, encoding: "utf8" },
-    );
-    if (push.status === 0) {
-      schemaApplied = true;
-    } else {
-      console.error(
-        "[WASYS DB] prisma db push failed",
-        (push.stderr || push.stdout || "").slice(0, 1000),
-      );
-    }
-  } else {
-    console.warn("[WASYS DB] prisma CLI missing (devDependency pruned?)");
-  }
-
-  if (!schemaApplied && existsSync(applyInitSql)) {
-    // No CLI on the server: create tables straight from the bundled init.sql.
-    const apply = spawnSync(process.execPath, [applyInitSql], {
-      cwd: process.cwd(),
-      env,
-      encoding: "utf8",
-    });
-    if (apply.status === 0) {
-      schemaApplied = true;
-      console.log((apply.stdout || "").trim());
-    } else {
-      console.error(
-        "[WASYS DB] apply-init-sql failed",
-        (apply.stderr || apply.stdout || "").slice(0, 1000),
-      );
-    }
-  }
-
-  if (!schemaApplied) {
-    console.error("[WASYS DB] could not create tables");
-    return;
-  }
-
-  const bootstrap = resolve(process.cwd(), "prisma/bootstrap.mjs");
-  if (!existsSync(bootstrap)) return;
-
-  const boot = spawnSync(process.execPath, [bootstrap], {
-    cwd: process.cwd(),
-    env,
-    encoding: "utf8",
-  });
-
-  if (boot.status !== 0) {
-    console.error(
-      "[WASYS DB] bootstrap failed",
-      (boot.stderr || boot.stdout || "").slice(0, 1000),
-    );
-  } else {
-    console.log("[WASYS DB] schema + bootstrap ready");
-  }
-}
-
 ensureSqliteDatabaseUrl();
-ensureSchemaAndBootstrap();
 
 export const prisma =
   globalForPrisma.prisma ??
@@ -169,3 +77,226 @@ export const prisma =
   });
 
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
+
+/**
+ * "The table `main.User` does not exist" → Prisma error P2021 (also P2010 when
+ * raised through raw queries). Used to decide whether self-heal should run.
+ */
+export function isMissingTableError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const code = "code" in error ? (error as { code?: unknown }).code : null;
+  if (code === "P2021") return true;
+  const message =
+    error instanceof Error ? error.message : String((error as object) ?? "");
+  return /table .* does not exist|no such table/i.test(message);
+}
+
+async function userTableExists(): Promise<boolean> {
+  const rows = await prisma.$queryRawUnsafe<Array<{ name: string }>>(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='User'",
+  );
+  return Array.isArray(rows) && rows.length > 0;
+}
+
+function readInitSqlStatements(): string[] {
+  const initSqlPath = resolve(process.cwd(), "prisma", "init.sql");
+  const sql = readFileSync(initSqlPath, "utf8");
+  return sql
+    .split(";")
+    .map((statement) => statement.trim())
+    .filter((statement) =>
+      // Drop chunks that only contain comments/whitespace.
+      statement
+        .split("\n")
+        .some((line) => line.trim() && !line.trim().startsWith("--")),
+    );
+}
+
+/**
+ * Creates all tables from prisma/init.sql through the ALREADY RUNNING Prisma
+ * client. No child processes, no CLI, no env drift: the DDL lands in exactly
+ * the database file this app queries.
+ */
+async function applyInitSqlInProcess(): Promise<void> {
+  const statements = readInitSqlStatements();
+  let applied = 0;
+  for (const statement of statements) {
+    try {
+      await prisma.$executeRawUnsafe(statement);
+      applied += 1;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/already exists/i.test(message)) continue;
+      throw new Error(
+        `init.sql statement failed: ${message.slice(0, 300)}\nStatement: ${statement.slice(0, 120)}`,
+      );
+    }
+  }
+  console.log(`[WASYS DB] init.sql applied in-process (${applied} statements)`);
+}
+
+/**
+ * In-process equivalent of prisma/bootstrap.mjs: creates the demo organization
+ * and the platform admin (PLATFORM_ADMIN_EMAILS + PLATFORM_ADMIN_PASSWORD) so
+ * login works right after the tables appear. Idempotent.
+ */
+async function bootstrapPlatformAdminInProcess(): Promise<void> {
+  let adminEmail = process.env.PLATFORM_ADMIN_EMAILS?.split(",")[0]
+    ?.trim()
+    ?.toLowerCase();
+  const adminPassword = process.env.PLATFORM_ADMIN_PASSWORD;
+
+  if (!adminEmail) {
+    const existingOwner = await prisma.user.findFirst({
+      where: { role: "OWNER" },
+      select: { email: true },
+      orderBy: { createdAt: "asc" },
+    });
+    adminEmail = existingOwner?.email ?? undefined;
+  }
+  if (!adminEmail || !adminEmail.includes("@")) {
+    console.warn(
+      "[WASYS DB] bootstrap skipped: PLATFORM_ADMIN_EMAILS missing or invalid",
+    );
+    return;
+  }
+  if (adminPassword && adminPassword.length < 12) {
+    console.warn(
+      "[WASYS DB] bootstrap skipped: PLATFORM_ADMIN_PASSWORD shorter than 12 chars",
+    );
+    return;
+  }
+
+  const organization = await prisma.organization.upsert({
+    where: { slug: "wasys-demo" },
+    update: { name: "WASYS Demo", plan: "PRO", maxUsers: 50 },
+    create: {
+      name: "WASYS Demo",
+      slug: "wasys-demo",
+      plan: "PRO",
+      maxUsers: 50,
+    },
+  });
+
+  const existingAdmin = await prisma.user.findUnique({
+    where: { email: adminEmail },
+    select: { passwordHash: true },
+  });
+  if (!existingAdmin && !adminPassword) {
+    console.warn(
+      "[WASYS DB] bootstrap skipped: PLATFORM_ADMIN_PASSWORD must be set to create the admin for the first time",
+    );
+    return;
+  }
+  const passwordHash = adminPassword
+    ? await hash(adminPassword, 12)
+    : existingAdmin!.passwordHash;
+
+  await prisma.user.upsert({
+    where: { email: adminEmail },
+    update: {
+      name: "WASYS Yönetici",
+      passwordHash,
+      role: "OWNER",
+      organizationId: organization.id,
+    },
+    create: {
+      email: adminEmail,
+      name: "WASYS Yönetici",
+      passwordHash,
+      role: "OWNER",
+      organizationId: organization.id,
+    },
+  });
+
+  const existingChannel = await prisma.channel.findFirst({
+    where: { organizationId: organization.id },
+  });
+  if (!existingChannel) {
+    await prisma.channel.create({
+      data: {
+        organizationId: organization.id,
+        name: "Ana WhatsApp",
+        type: "WHATSAPP_QR",
+        status: "DISCONNECTED",
+        sessionId: `sess_${organization.id.slice(0, 8)}`,
+      },
+    });
+  }
+
+  const defaultTags = [
+    { name: "Yeni Lead", color: "#128C7E" },
+    { name: "Sipariş", color: "#25D366" },
+    { name: "Destek", color: "#075E54" },
+  ];
+  for (const tag of defaultTags) {
+    await prisma.tag.upsert({
+      where: {
+        organizationId_name: {
+          organizationId: organization.id,
+          name: tag.name,
+        },
+      },
+      update: { color: tag.color },
+      create: { ...tag, organizationId: organization.id },
+    });
+  }
+
+  console.log(
+    `[WASYS DB] platform admin ready (${adminEmail.slice(0, 2)}***)`,
+  );
+}
+
+async function runSelfHeal(): Promise<boolean> {
+  const databaseUrl = process.env.DATABASE_URL?.trim();
+  // Self-heal only applies to SQLite. Other providers use real migrations.
+  if (!databaseUrl?.startsWith("file:")) return false;
+
+  if (await userTableExists()) {
+    // Tables are fine; still make sure the admin exists (cheap check).
+    const emails = process.env.PLATFORM_ADMIN_EMAILS?.trim();
+    if (emails) {
+      const adminEmail = emails.split(",")[0]?.trim().toLowerCase();
+      if (adminEmail?.includes("@")) {
+        const admin = await prisma.user.findUnique({
+          where: { email: adminEmail },
+          select: { id: true },
+        });
+        if (!admin) await bootstrapPlatformAdminInProcess();
+      }
+    }
+    return true;
+  }
+
+  console.log("[WASYS DB] Tables missing — applying init.sql in-process");
+  await applyInitSqlInProcess();
+
+  if (!(await userTableExists())) {
+    throw new Error("init.sql applied but User table still missing");
+  }
+
+  await bootstrapPlatformAdminInProcess();
+  return true;
+}
+
+/**
+ * Deterministic self-heal: ensures tables + platform admin exist in the SAME
+ * database file the running Prisma client uses. Memoized per process, but a
+ * failure clears the memo so the next call (e.g. a /api/health refresh) retries.
+ */
+export function ensureDatabaseReady(): Promise<boolean> {
+  if (!globalForPrisma.__wasysSelfHeal) {
+    globalForPrisma.__wasysSelfHeal = runSelfHeal().catch((error) => {
+      globalForPrisma.__wasysSelfHeal = null;
+      console.error("[WASYS DB] self-heal failed", error);
+      return false;
+    });
+  }
+  return globalForPrisma.__wasysSelfHeal;
+}
+
+// Kick off the self-heal on first import so a plain Restart fixes an empty DB
+// even if nobody visits /api/health. Skippable for tooling.
+if (process.env.WASYS_SKIP_DB_PUSH !== "1") {
+  void ensureDatabaseReady();
+}

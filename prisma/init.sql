@@ -6,7 +6,13 @@ CREATE TABLE "Organization" (
     "plan" TEXT NOT NULL DEFAULT 'BASIC',
     "maxUsers" INTEGER NOT NULL DEFAULT 5,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "updatedAt" DATETIME NOT NULL,
+    "welcomeMessageEnabled" BOOLEAN NOT NULL DEFAULT false,
+    "welcomeMessage" TEXT,
+    "awayMessageEnabled" BOOLEAN NOT NULL DEFAULT false,
+    "awayMessage" TEXT,
+    "distributionMode" TEXT NOT NULL DEFAULT 'NONE',
+    "alertEmail" TEXT
 );
 
 -- CreateTable
@@ -19,6 +25,7 @@ CREATE TABLE "User" (
     "phone" TEXT,
     "avatarUrl" TEXT,
     "organizationId" TEXT NOT NULL,
+    "lastActiveAt" DATETIME,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
     CONSTRAINT "User_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization" ("id") ON DELETE CASCADE ON UPDATE CASCADE

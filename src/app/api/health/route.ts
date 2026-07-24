@@ -1,7 +1,7 @@
 import { accessSync, constants, existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { ensureDatabaseReady, isMissingTableError, prisma } from "@/lib/db";
 import { platformAdminEmails } from "@/lib/platform-admin";
 
 function maskEmail(email: string) {
@@ -95,29 +95,54 @@ export async function GET() {
 
   let databaseConnected = false;
   let userCount: number | null = null;
+  const selfHeal: { attempted: boolean; succeeded: boolean | null } = {
+    attempted: false,
+    succeeded: null,
+  };
   let databaseError: {
     name: string;
     code: string | null;
     message: string | null;
   } | null = null;
 
+  const describeError = (error: unknown) => {
+    console.error("[WASYS Health] database readiness check failed", error);
+    return {
+      name: error instanceof Error ? error.name : "UnknownError",
+      code:
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        typeof error.code === "string"
+          ? error.code
+          : null,
+      message: error instanceof Error ? error.message.slice(0, 300) : null,
+    };
+  };
+
   if (hasDatabaseUrl) {
     try {
       userCount = await prisma.user.count();
       databaseConnected = true;
     } catch (error) {
-      console.error("[WASYS Health] database readiness check failed", error);
-      databaseError = {
-        name: error instanceof Error ? error.name : "UnknownError",
-        code:
-          typeof error === "object" &&
-          error !== null &&
-          "code" in error &&
-          typeof error.code === "string"
-            ? error.code
-            : null,
-        message: error instanceof Error ? error.message.slice(0, 300) : null,
-      };
+      if (isMissingTableError(error)) {
+        // Tables missing → apply prisma/init.sql through the running Prisma
+        // client (in-process, same DB file) and create the platform admin.
+        selfHeal.attempted = true;
+        selfHeal.succeeded = await ensureDatabaseReady();
+        if (selfHeal.succeeded) {
+          try {
+            userCount = await prisma.user.count();
+            databaseConnected = true;
+          } catch (retryError) {
+            databaseError = describeError(retryError);
+          }
+        } else {
+          databaseError = describeError(error);
+        }
+      } else {
+        databaseError = describeError(error);
+      }
     }
   }
 
@@ -156,6 +181,7 @@ export async function GET() {
       database: {
         userCount,
         error: databaseError,
+        selfHeal,
         sqlite,
       },
       platformAdmin,
@@ -164,7 +190,7 @@ export async function GET() {
         ? "Create a .env file in the Hostinger nodejs/ folder with AUTH_SECRET=... then Restart the app."
         : !databaseConnected
           ? databaseError?.code === "P2021"
-            ? "DB dosyası var ama tablolar yok. Redeploy / Restart edin (otomatik prisma db push çalışacak). Entry file=server.js."
+            ? "Tablolar yok ve otomatik onarım (init.sql) başarısız oldu. Bu sayfayı yenileyin; olmazsa health.database.error mesajına bakın ve Redeploy edin."
             : "SQLite açılamıyor. DATABASE_URL=file:/home/u781807728/domains/wasys.pro/nodejs/data/prod.db; Entry file=server.js; Redeploy. health.database.sqlite alanına bakın."
         : adminHint,
     },

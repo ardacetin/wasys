@@ -76,6 +76,21 @@ En kolayı yine de: File Manager’da `data` + doğru `DATABASE_URL`, sonra pane
 `prepare-db.mjs` klasörü oluşturur; yazamazsa otomatik `nodejs/data/prod.db`’ye düşer.
 Start/build aynı process env ile `prisma db push` + bootstrap çalıştırır.
 
+## Otomatik onarım (self-heal)
+
+`server.js` artık `.env` dosyasını kendisi yükler, SQLite yolunu normalize eder
+ve başlangıçta loglara `[WASYS] SQLite database: file:...` satırını yazar —
+`db push`un hangi dosyaya çalıştığını buradan doğrulayabilirsiniz.
+
+Ayrıca uygulama, tabloların eksik olduğunu görürse (`P2021`) **kendi içinde**
+`prisma/init.sql`'i çalışan Prisma client üzerinden uygular ve
+`PLATFORM_ADMIN_EMAILS` + `PLATFORM_ADMIN_PASSWORD` ile platform yöneticisini
+oluşturur. Alt süreç (CLI) gerektirmez; paylaşımlı hosting limitlerinden
+etkilenmez.
+
+**Yani:** DB boşsa https://wasys.pro/api/health adresini yenilemek yeterli —
+tablolar ve admin otomatik oluşur (`database.selfHeal` alanında sonucu görürsünüz).
+
 `db:bootstrap` mevcut müşteri verilerini silmez; yalnızca sunucu environment
 variable’larında tanımlanan platform yöneticisini idempotent olarak hazırlar.
 Kimlik bilgilerini kaynak koduna veya public dokümana yazmayın.

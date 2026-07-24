@@ -3,25 +3,83 @@
  * hPanel → Application startup file / Entry file = server.js
  */
 const { spawnSync } = require("node:child_process");
-const { existsSync } = require("node:fs");
+const {
+  accessSync,
+  closeSync,
+  constants,
+  existsSync,
+  mkdirSync,
+  openSync,
+} = require("node:fs");
 const { createServer } = require("node:http");
-const { dirname, resolve } = require("node:path");
+const { dirname, isAbsolute, resolve } = require("node:path");
 const { parse } = require("node:url");
-const next = require("next");
 
 const projectRoot = __dirname;
 const nodeDir = dirname(process.execPath);
 process.env.PATH = `${nodeDir}${process.env.PATH ? `:${process.env.PATH}` : ""}`;
 
-function bin(name) {
-  const local = resolve(projectRoot, "node_modules", ".bin", name);
-  if (!existsSync(local)) {
-    throw new Error(
-      `Missing ${local}. Wait for Hostinger build (npm install) to finish.`,
-    );
-  }
-  return local;
+// Hostinger writes env vars to nodejs/.env but does NOT always export them to
+// the process. Load it here so this process AND every child we spawn see the
+// exact same DATABASE_URL. dotenv never overrides already-exported vars.
+try {
+  require("dotenv").config({ path: resolve(projectRoot, ".env") });
+} catch (error) {
+  console.warn("[WASYS] Could not load .env", error);
 }
+
+/**
+ * Normalize DATABASE_URL to an absolute, writable SQLite path IN THIS process,
+ * so the spawned prisma CLI and the Next app all target the same file.
+ * (prepare-db.mjs used to do this in a child process — the fix never
+ * propagated back here, which is how `db push` and the app could drift apart.)
+ */
+function normalizeDatabaseUrl() {
+  const configured = process.env.DATABASE_URL?.trim();
+  if (!configured) {
+    console.warn("[WASYS] DATABASE_URL is not set (check nodejs/.env)");
+    return;
+  }
+  if (!configured.startsWith("file:")) {
+    console.log(`[WASYS] DATABASE_URL provider: ${configured.split(":")[0]}`);
+    return;
+  }
+
+  const raw = decodeURIComponent(configured.slice("file:".length).split("?")[0]);
+  const configuredPath = raw.replace(/^\/\/\//, "/").replace(/^\/\/[^/]*/, "");
+  const databasePath = isAbsolute(configuredPath)
+    ? configuredPath
+    : resolve(projectRoot, "prisma", configuredPath);
+
+  const ensureWritable = (path) => {
+    const directory = dirname(path);
+    mkdirSync(directory, { recursive: true });
+    accessSync(directory, constants.W_OK);
+    try {
+      accessSync(path, constants.R_OK | constants.W_OK);
+    } catch {
+      closeSync(openSync(path, "a"));
+    }
+  };
+
+  try {
+    ensureWritable(databasePath);
+    process.env.DATABASE_URL = `file:${databasePath}`;
+  } catch (error) {
+    const fallbackPath = resolve(projectRoot, "data", "prod.db");
+    console.error(
+      `[WASYS] DATABASE_URL path not writable (${error.message}). Falling back to ${fallbackPath}`,
+    );
+    ensureWritable(fallbackPath);
+    process.env.DATABASE_URL = `file:${fallbackPath}`;
+  }
+
+  // SQLite file paths are not secrets — log the resolved target so Hostinger
+  // logs show exactly which file `db push` and the app use.
+  console.log(`[WASYS] SQLite database: ${process.env.DATABASE_URL}`);
+}
+
+normalizeDatabaseUrl();
 
 function prismaCli() {
   const cli = resolve(projectRoot, "node_modules/prisma/build/index.js");
@@ -33,23 +91,6 @@ function prismaCli() {
   return cli;
 }
 
-function run(command, args) {
-  const result = spawnSync(command, args, {
-    cwd: projectRoot,
-    env: process.env,
-    stdio: "inherit",
-  });
-
-  if (result.error) {
-    console.error(result.error);
-    process.exit(1);
-  }
-
-  if (result.status !== 0) {
-    process.exit(result.status ?? 1);
-  }
-}
-
 function runOptional(command, args, label) {
   const result = spawnSync(command, args, {
     cwd: projectRoot,
@@ -58,21 +99,27 @@ function runOptional(command, args, label) {
   });
   if (result.error || result.status !== 0) {
     console.error(
-      `[WASYS] ${label} failed (site will still start). Check /api/health for hints.`,
+      `[WASYS] ${label} failed (site will still start; in-process self-heal in src/lib/db.ts covers schema + admin). Check /api/health.`,
       result.error ?? `exit code ${result.status}`,
     );
   }
 }
 
-run(process.execPath, [resolve(projectRoot, "prisma/prepare-db.mjs")]);
-run(process.execPath, [prismaCli(), "db", "push"]);
-// Bootstrap creates/updates the platform admin from PLATFORM_ADMIN_EMAILS +
-// PLATFORM_ADMIN_PASSWORD. A bad .env value must not take the whole site down.
+// Best effort: push schema + bootstrap admin via the CLI. If spawning fails on
+// the shared host (memory/process limits), the app still starts — src/lib/db.ts
+// applies prisma/init.sql in-process and creates the platform admin itself.
+try {
+  runOptional(process.execPath, [prismaCli(), "db", "push"], "prisma db push");
+} catch (error) {
+  console.error("[WASYS] prisma CLI unavailable", error.message);
+}
 runOptional(
   process.execPath,
   [resolve(projectRoot, "prisma/bootstrap.mjs")],
   "bootstrap",
 );
+
+const next = require("next");
 
 const port = Number(process.env.PORT || 3000);
 const hostname = process.env.HOSTNAME || "0.0.0.0";
