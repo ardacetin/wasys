@@ -253,18 +253,10 @@ async function runSelfHeal(): Promise<boolean> {
   if (!databaseUrl?.startsWith("file:")) return false;
 
   if (await userTableExists()) {
-    // Tables are fine; still make sure the admin exists (cheap check).
-    const emails = process.env.PLATFORM_ADMIN_EMAILS?.trim();
-    if (emails) {
-      const adminEmail = emails.split(",")[0]?.trim().toLowerCase();
-      if (adminEmail?.includes("@")) {
-        const admin = await prisma.user.findUnique({
-          where: { email: adminEmail },
-          select: { id: true },
-        });
-        if (!admin) await bootstrapPlatformAdminInProcess();
-      }
-    }
+    // Tablolar tamamsa da admin şifresini her açılışta .env değerine eşitle.
+    // (Eskiden bunu bootstrap.mjs alt süreci yapıyordu; Hostinger'da alt
+    // süreçler başarısız olabildiği için artık süreç içinde yapılıyor.)
+    await bootstrapPlatformAdminInProcess();
     return true;
   }
 

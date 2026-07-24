@@ -66,14 +66,25 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         if (!parsed.success) return null;
 
         try {
+          const email = parsed.data.email.toLowerCase();
           const user = await prisma.user.findUnique({
-            where: { email: parsed.data.email.toLowerCase() },
+            where: { email },
             include: { organization: true },
           });
-          if (!user) return null;
+          if (!user) {
+            console.warn(
+              `[WASYS Auth] login failed: user not found (${email.slice(0, 2)}***)`,
+            );
+            return null;
+          }
 
           const valid = await compare(parsed.data.password, user.passwordHash);
-          if (!valid) return null;
+          if (!valid) {
+            console.warn(
+              `[WASYS Auth] login failed: wrong password (${email.slice(0, 2)}***)`,
+            );
+            return null;
+          }
 
           return {
             id: user.id,
