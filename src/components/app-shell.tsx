@@ -3,7 +3,17 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
-import { Inbox, MessageSquareText, Settings, Users, Radio, GitBranch, KeyRound, BarChart3 } from "lucide-react";
+import {
+  BarChart3,
+  Building2,
+  GitBranch,
+  Inbox,
+  KeyRound,
+  MessageSquareText,
+  Radio,
+  Settings,
+  Users,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const links = [
@@ -22,13 +32,21 @@ export function AppShell({
   userName,
   orgName,
   plan,
+  isPlatformAdmin,
 }: {
   children: React.ReactNode;
   userName: string;
   orgName: string;
   plan: string;
+  isPlatformAdmin: boolean;
 }) {
   const pathname = usePathname();
+  const visibleLinks = isPlatformAdmin
+    ? [
+        ...links,
+        { href: "/admin/accounts", label: "Müşteri hesapları", icon: Building2 },
+      ]
+    : links;
 
   return (
     <div className="flex min-h-screen">
@@ -38,7 +56,7 @@ export function AppShell({
           <div className="mt-1 truncate text-xs text-white/55">{orgName}</div>
         </div>
         <nav className="flex flex-1 flex-col gap-1 p-3">
-          {links.map((link) => {
+          {visibleLinks.map((link) => {
             const Icon = link.icon;
             const active = pathname.startsWith(link.href);
             return (
@@ -72,7 +90,7 @@ export function AppShell({
         <header className="flex items-center justify-between border-b border-line bg-bg-elevated/80 px-4 py-3 backdrop-blur md:hidden">
           <div className="font-[family-name:var(--font-display)] text-xl text-brand-deep">WASYS</div>
           <div className="flex gap-2 overflow-x-auto text-xs">
-            {links.map((l) => (
+            {visibleLinks.map((l) => (
               <Link key={l.href} href={l.href} className="rounded-full border border-line px-3 py-1">
                 {l.label}
               </Link>

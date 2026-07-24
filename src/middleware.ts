@@ -20,13 +20,13 @@ export function middleware(req: NextRequest) {
   const isLoggedIn = hasSessionCookie(req);
 
   // Bypass broken CDN-cached RSC on old App Router /login
-  if (path === "/login" || path === "/register") {
-    const target = path === "/login" ? "/giris" : "/kayit";
-    return NextResponse.redirect(new URL(target + req.nextUrl.search, req.url), 307);
+  if (path === "/login" || path === "/register" || path === "/kayit") {
+    return NextResponse.redirect(new URL("/giris" + req.nextUrl.search, req.url), 307);
   }
 
-  const isAuthPage = path === "/giris" || path === "/kayit";
+  const isAuthPage = path === "/giris";
   const isProtected =
+    path.startsWith("/admin") ||
     path.startsWith("/inbox") ||
     path.startsWith("/settings") ||
     path.startsWith("/reports");
@@ -45,6 +45,7 @@ export function middleware(req: NextRequest) {
 export const config = {
   matcher: [
     "/inbox/:path*",
+    "/admin/:path*",
     "/settings/:path*",
     "/reports/:path*",
     "/login",
