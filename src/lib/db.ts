@@ -86,40 +86,57 @@ function ensureSchemaAndBootstrap() {
   const databasePath = raw.replace(/^\/\/\//, "/").replace(/^\/\/[^/]*/, "");
   const fileBytes = existsSync(databasePath) ? statSync(databasePath).size : 0;
 
-  const prismaCli = resolve(process.cwd(), "node_modules/prisma/build/index.js");
-  if (!existsSync(prismaCli)) {
-    console.error("[WASYS DB] prisma CLI missing — cannot create tables");
-    return;
-  }
-
   const nodeDir = dirname(process.execPath);
   const env = {
     ...process.env,
     PATH: `${nodeDir}${process.env.PATH ? `:${process.env.PATH}` : ""}`,
   };
 
-  // Always push when DB is empty/tiny; otherwise push is cheap when already in sync.
-  if (fileBytes < 1024 || process.env.WASYS_FORCE_DB_PUSH === "1") {
-    console.log(`[WASYS DB] Running prisma db push (fileBytes=${fileBytes})`);
+  const prismaCli = resolve(process.cwd(), "node_modules/prisma/build/index.js");
+  const applyInitSql = resolve(process.cwd(), "prisma/apply-init-sql.mjs");
+
+  console.log(`[WASYS DB] Ensuring schema (fileBytes=${fileBytes})`);
+
+  let schemaApplied = false;
+
+  if (existsSync(prismaCli)) {
+    const push = spawnSync(
+      process.execPath,
+      [prismaCli, "db", "push", "--skip-generate"],
+      { cwd: process.cwd(), env, encoding: "utf8" },
+    );
+    if (push.status === 0) {
+      schemaApplied = true;
+    } else {
+      console.error(
+        "[WASYS DB] prisma db push failed",
+        (push.stderr || push.stdout || "").slice(0, 1000),
+      );
+    }
   } else {
-    console.log("[WASYS DB] Ensuring schema is up to date");
+    console.warn("[WASYS DB] prisma CLI missing (devDependency pruned?)");
   }
 
-  const push = spawnSync(
-    process.execPath,
-    [prismaCli, "db", "push", "--skip-generate"],
-    {
+  if (!schemaApplied && existsSync(applyInitSql)) {
+    // No CLI on the server: create tables straight from the bundled init.sql.
+    const apply = spawnSync(process.execPath, [applyInitSql], {
       cwd: process.cwd(),
       env,
       encoding: "utf8",
-    },
-  );
+    });
+    if (apply.status === 0) {
+      schemaApplied = true;
+      console.log((apply.stdout || "").trim());
+    } else {
+      console.error(
+        "[WASYS DB] apply-init-sql failed",
+        (apply.stderr || apply.stdout || "").slice(0, 1000),
+      );
+    }
+  }
 
-  if (push.status !== 0) {
-    console.error(
-      "[WASYS DB] prisma db push failed",
-      (push.stderr || push.stdout || "").slice(0, 1000),
-    );
+  if (!schemaApplied) {
+    console.error("[WASYS DB] could not create tables");
     return;
   }
 
