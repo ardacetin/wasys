@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 /** Deploy doğrulama — UI/log'da bu ID yoksa Hostinger eski gateway dosyasını çalıştırıyordur. */
-export const GATEWAY_LOADER_ID = "wa-runtime-2026-07-26n";
+export const GATEWAY_LOADER_ID = "wa-runtime-2026-07-26o";
 
 function getConnectedSessionForChannel(channelId) {
   if (!channelId) return null;
@@ -517,14 +517,32 @@ function isLidJid(jid) {
   );
 }
 
-/** Baileys status: 3 = delivered, 4 = read */
-function waitForOutboundStatus(sock, messageKey, minStatus, timeoutMs) {
+function recordOutboundMessageStatus(session, messageId, status) {
+  if (!messageId || typeof status !== "number") return;
+  if (!session.outboundStatusById) session.outboundStatusById = new Map();
+  const prev = session.outboundStatusById.get(messageId) ?? 0;
+  session.outboundStatusById.set(messageId, Math.max(prev, status));
+  if (session.outboundStatusById.size > 200) {
+    const first = session.outboundStatusById.keys().next().value;
+    if (first) session.outboundStatusById.delete(first);
+  }
+}
+
+/** Baileys status: 2 = server ACK, 3 = delivered, 4 = read */
+function waitForOutboundStatus(session, sock, messageKey, minStatus, timeoutMs) {
   const id = messageKey?.id;
-  if (!id || !sock?.ev?.on) return Promise.resolve(false);
+  if (!id || !sock?.ev?.on) {
+    return Promise.resolve({ ok: false, maxStatus: 0 });
+  }
+
+  let maxStatus = session?.outboundStatusById?.get(id) ?? 0;
+  if (maxStatus >= minStatus) {
+    return Promise.resolve({ ok: true, maxStatus });
+  }
 
   return new Promise((resolve) => {
     let settled = false;
-    const finish = (ok) => {
+    const finish = (result) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -533,22 +551,29 @@ function waitForOutboundStatus(sock, messageKey, minStatus, timeoutMs) {
       } catch {
         /* ignore */
       }
-      resolve(ok);
+      resolve(result);
     };
 
     const handler = (updates) => {
       for (const u of updates) {
         if (u.key?.id !== id) continue;
         const st = u.update?.status;
-        if (typeof st === "number" && st >= minStatus) {
-          finish(true);
-          return;
+        if (typeof st === "number") {
+          maxStatus = Math.max(maxStatus, st);
+          recordOutboundMessageStatus(session, id, st);
+          if (st >= minStatus) {
+            finish({ ok: true, maxStatus });
+            return;
+          }
         }
       }
     };
 
     sock.ev.on("messages.update", handler);
-    const timer = setTimeout(() => finish(false), timeoutMs);
+    const timer = setTimeout(
+      () => finish({ ok: maxStatus >= minStatus, maxStatus }),
+      timeoutMs,
+    );
   });
 }
 
@@ -603,37 +628,51 @@ async function sendWithJidFallback(session, to, preferredJid, buildContent) {
 
       // LID: sunucu id döner ama karşıya düşmeyebilir — teslimat (3+) bekle, yoksa sıradaki JID.
       if (isLidJid(jid)) {
-        const delivered = await waitForOutboundStatus(sock, result.key, 3, 9000);
+        const wait = await waitForOutboundStatus(session, sock, result.key, 3, 9000);
+        const acceptLid =
+          wait.ok || (isLidJid(jid) && wait.maxStatus >= 2);
         // #region agent log
         agentDebugLog(
           "wa-runtime.mjs:sendWithJidFallback",
           "LID delivery wait result",
-          { jid, externalId, delivered },
+          { jid, externalId, ok: wait.ok, maxStatus: wait.maxStatus, acceptLid },
           "E",
         );
         // #endregion
-        if (!delivered) {
+        if (!acceptLid) {
           sawLidDeliveryMiss = true;
           logger.warn(
-            { sessionId: session.sessionId, jid, externalId, phone },
-            "LID send got id but no delivery — trying next jid",
+            { sessionId: session.sessionId, jid, externalId, phone, maxStatus: wait.maxStatus },
+            "LID send got id but no ACK/delivery — trying next jid",
           );
           continue;
         }
       } else if (lidPreferredChat || sawLidDeliveryMiss) {
-        // iOS/Meta LID sohbet: PN ile id gelir ama karşıya düşmez — teslimat şart.
-        const delivered = await waitForOutboundStatus(sock, result.key, 3, 12000);
+        const wait = await waitForOutboundStatus(session, sock, result.key, 3, 12000);
         // #region agent log
         agentDebugLog(
           "wa-runtime.mjs:sendWithJidFallback",
           "PN delivery wait (LID chat)",
-          { jid, externalId, delivered, lidPreferredChat, sawLidDeliveryMiss },
+          {
+            jid,
+            externalId,
+            ok: wait.ok,
+            maxStatus: wait.maxStatus,
+            lidPreferredChat,
+            sawLidDeliveryMiss,
+          },
           "E",
         );
         // #endregion
-        if (!delivered) {
+        if (!wait.ok) {
           logger.warn(
-            { sessionId: session.sessionId, jid, externalId, phone },
+            {
+              sessionId: session.sessionId,
+              jid,
+              externalId,
+              phone,
+              maxStatus: wait.maxStatus,
+            },
             "PN send got id but no delivery in LID chat — trying next jid",
           );
           continue;
@@ -901,6 +940,7 @@ async function startSocket(session) {
   sock.ev.on("messages.update", async (updates) => {
     for (const u of updates) {
       if (!u.key?.id || !u.update?.status) continue;
+      recordOutboundMessageStatus(session, u.key.id, u.update.status);
       const statusMap = {
         2: "SENT",
         3: "DELIVERED",
