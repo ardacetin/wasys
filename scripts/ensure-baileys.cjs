@@ -33,6 +33,9 @@ const BAILEYS_RUNTIME_SPECS = [
   "axios@^1.6.0",
   "music-metadata@^11.7.0",
   "@cacheable/node-cache@^1.4.0",
+  "cacheable@^2.3.1",
+  "hookified@^1.14.0",
+  "keyv@^5.5.5",
 ];
 const BAILEYS_RUNTIME_MARKERS = [
   "protobufjs/package.json",
@@ -43,6 +46,9 @@ const BAILEYS_RUNTIME_MARKERS = [
   "axios/package.json",
   "music-metadata/package.json",
   "@cacheable/node-cache/package.json",
+  "cacheable/package.json",
+  "hookified/package.json",
+  "keyv/package.json",
   "libsignal/package.json",
 ];
 /** Baileys paketi yarım kaldığında (Hostinger eşzamanlı kopya) import patlar. */
@@ -189,6 +195,7 @@ function restorePersistentNodeModules() {
   for (const entry of entries) {
     copyPackageTree(persistentNmRoot, nmRoot, entry);
   }
+  hoistNestedDependencies(nmRoot);
   console.log(`[WASYS] Baileys paketleri kalıcı dizinden geri yüklendi → ${persistentNmRoot}`);
   return isBaileysComplete();
 }
@@ -206,6 +213,7 @@ function backupPersistentNodeModules() {
       entry === "@whiskeysockets" ||
       entry.startsWith("@hapi") ||
       entry.startsWith("@cacheable") ||
+      entry.startsWith("@keyv") ||
       [
         "ws",
         "protobufjs",
@@ -213,6 +221,9 @@ function backupPersistentNodeModules() {
         "axios",
         "music-metadata",
         "libsignal",
+        "cacheable",
+        "hookified",
+        "keyv",
         "qrcode",
         "pino",
       ].includes(entry)
@@ -263,6 +274,7 @@ function ensureBaileysRuntimeDeps() {
 
   // npm paketleri (git libsignal hariç)
   installViaPrefix(BAILEYS_RUNTIME_SPECS);
+  hoistNestedDependencies(nmRoot);
 
   // libsignal git bağımlılığı — baileys ile birlikte dene (git yoksa atlanır)
   if (!existsSync(resolve(nmRoot, "libsignal/package.json"))) {
@@ -332,6 +344,37 @@ function syncVendorCopy() {
   return false;
 }
 
+function copyAllNodeModulesFrom(srcNm, toRoot) {
+  if (!existsSync(srcNm)) return;
+  mkdirSync(toRoot, { recursive: true });
+  for (const entry of readdirSync(srcNm)) {
+    if (entry === ".bin" || entry.startsWith(".")) continue;
+    copyPackageTree(srcNm, toRoot, entry);
+  }
+}
+
+/** npm bazen bağımlılıkları paket içi node_modules'te bırakır — ESM import kökten arar. */
+function hoistNestedDependencies(rootNm) {
+  if (!existsSync(rootNm)) return;
+  const queue = [];
+  for (const entry of readdirSync(rootNm)) {
+    if (entry.startsWith(".")) continue;
+    if (entry.startsWith("@")) {
+      const scopePath = resolve(rootNm, entry);
+      for (const scoped of readdirSync(scopePath)) {
+        queue.push(resolve(scopePath, scoped));
+      }
+    } else {
+      queue.push(resolve(rootNm, entry));
+    }
+  }
+  for (const pkgDir of queue) {
+    const nested = resolve(pkgDir, "node_modules");
+    if (!existsSync(nested)) continue;
+    copyAllNodeModulesFrom(nested, rootNm);
+  }
+}
+
 /**
  * Paketleri boş bir prefix'e kur, sonra proje node_modules'e kopyala.
  * Proje kökünde npm install YAPMA — Hostinger'da next ENOTEMPTY/503 yapıyor.
@@ -369,24 +412,8 @@ function installViaPrefix(specs) {
     }
 
     mkdirSync(nmRoot, { recursive: true });
-    for (const entry of readdirSync(srcNm)) {
-      if (entry === ".bin" || entry.startsWith(".")) continue;
-      const from = resolve(srcNm, entry);
-      const to = resolve(nmRoot, entry);
-      // Scoped packages (@whiskeysockets): merge into scope dir
-      if (entry.startsWith("@")) {
-        mkdirSync(to, { recursive: true });
-        for (const scoped of readdirSync(from)) {
-          const sFrom = resolve(from, scoped);
-          const sTo = resolve(to, scoped);
-          rmSync(sTo, { recursive: true, force: true });
-          cpSync(sFrom, sTo, { recursive: true, force: true });
-        }
-        continue;
-      }
-      rmSync(to, { recursive: true, force: true });
-      cpSync(from, to, { recursive: true, force: true });
-    }
+    copyAllNodeModulesFrom(srcNm, nmRoot);
+    hoistNestedDependencies(nmRoot);
     return result;
   } finally {
     try {
