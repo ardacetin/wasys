@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 /** Deploy doğrulama — UI/log'da bu ID yoksa Hostinger eski gateway dosyasını çalıştırıyordur. */
-export const GATEWAY_LOADER_ID = "wa-runtime-2026-07-26b";
+export const GATEWAY_LOADER_ID = "wa-runtime-2026-07-26c";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -59,13 +59,15 @@ const pino = requireDependency("pino", "pino/pino.js");
  * gateway/server.mjs kalabiliyor. Paket adını HİÇ kullanma — yalnızca file:// .
  */
 async function loadBaileys() {
+  // Önce node_modules — bağımlılıklar (protobufjs) orada hoist edilir.
+  // vendor yolu yedek (paket budanmışsa).
   const candidates = [
-    path.join(__dirname, "vendor/baileys/lib/index.js"),
-    path.join(PROJECT_ROOT, "gateway/vendor/baileys/lib/index.js"),
     path.join(
       PROJECT_ROOT,
       "node_modules/@whiskeysockets/baileys/lib/index.js",
     ),
+    path.join(__dirname, "vendor/baileys/lib/index.js"),
+    path.join(PROJECT_ROOT, "gateway/vendor/baileys/lib/index.js"),
   ];
 
   const existing = candidates.filter((entry) => fs.existsSync(entry));

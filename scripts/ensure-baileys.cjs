@@ -21,6 +21,26 @@ const { dirname, join, resolve } = require("node:path");
 
 const BAILEYS_SPEC = "@whiskeysockets/baileys@6.7.22";
 const GATEWAY_SPECS = ["qrcode@1.5.4", "pino@10.3.1"];
+/** Baileys paket dosyası varken Hostinger'ın budadığı runtime bağımlılıklar. */
+const BAILEYS_RUNTIME_SPECS = [
+  "protobufjs@^7.2.4",
+  "ws@^8.13.0",
+  "@hapi/boom@^9.1.3",
+  "async-mutex@^0.5.0",
+  "axios@^1.6.0",
+  "music-metadata@^11.7.0",
+  "@cacheable/node-cache@^1.4.0",
+];
+const BAILEYS_RUNTIME_MARKERS = [
+  "protobufjs/package.json",
+  "ws/package.json",
+  "@hapi/boom/package.json",
+  "async-mutex/package.json",
+  "axios/package.json",
+  "music-metadata/package.json",
+  "@cacheable/node-cache/package.json",
+  "libsignal/package.json",
+];
 const projectRoot = resolve(__dirname, "..");
 const nmRoot = resolve(projectRoot, "node_modules");
 const nmPackage = resolve(nmRoot, "@whiskeysockets/baileys");
@@ -60,6 +80,52 @@ function resolveNpm() {
 
 function isInstalled() {
   return existsSync(nmMarker) && existsSync(nmEntry);
+}
+
+function missingBaileysRuntimeDeps() {
+  return BAILEYS_RUNTIME_MARKERS.filter(
+    (rel) => !existsSync(resolve(nmRoot, rel)),
+  );
+}
+
+function ensureBaileysRuntimeDeps() {
+  const missing = missingBaileysRuntimeDeps();
+  if (missing.length === 0) {
+    console.log("[WASYS] Baileys runtime deps hazır (protobufjs, ws, …)");
+    return true;
+  }
+
+  console.warn(
+    `[WASYS] Baileys runtime deps eksik: ${missing.join(", ")} — izole kurulum…`,
+  );
+
+  // npm paketleri (git libsignal hariç)
+  installViaPrefix(BAILEYS_RUNTIME_SPECS);
+
+  // libsignal git bağımlılığı — baileys ile birlikte dene (git yoksa atlanır)
+  if (!existsSync(resolve(nmRoot, "libsignal/package.json"))) {
+    console.warn("[WASYS] libsignal eksik — Baileys ile izole kurulum deneniyor…");
+    installViaPrefix([BAILEYS_SPEC]);
+  }
+
+  const still = missingBaileysRuntimeDeps();
+  // libsignal olmadan da protobufjs yüklenir; QR için kritik olanlar npm paketleri
+  const criticalStill = still.filter((rel) => !rel.startsWith("libsignal/"));
+  if (criticalStill.length) {
+    console.error(`[WASYS] Baileys runtime deps hâlâ yok: ${criticalStill.join(", ")}`);
+    console.error(
+      "[WASYS] SSH (next'e dokunmadan):\n" +
+        '  TMP=$(mktemp -d) && npm install protobufjs ws @hapi/boom async-mutex axios music-metadata @cacheable/node-cache --prefix "$TMP" --omit=dev --legacy-peer-deps && cp -a "$TMP"/node_modules/. ./node_modules/ && rm -rf "$TMP" && node scripts/ensure-baileys.cjs',
+    );
+    return false;
+  }
+  if (still.includes("libsignal/package.json")) {
+    console.warn(
+      "[WASYS] libsignal yok — WhatsApp bağlanınca gerekebilir. Redeploy veya: npm install @whiskeysockets/baileys@6.7.22 (git gerekir)",
+    );
+  }
+  console.log("[WASYS] Baileys runtime deps kuruldu (izole prefix)");
+  return true;
 }
 
 /** npm ENOTEMPTY sonrası kalan `node_modules/.next-XXXX` klasörlerini temizle. */
@@ -205,39 +271,39 @@ function ensureGatewayDeps() {
 function ensureBaileysInstalled() {
   ensureGatewayDeps();
 
-  if (isInstalled()) {
+  if (!isInstalled()) {
+    console.warn(
+      `[WASYS] ${BAILEYS_SPEC} eksik — izole kurulum deneniyor (Hostinger node_modules budaması)`,
+    );
+
+    const result = installViaPrefix([BAILEYS_SPEC]);
+
+    if (result.error) {
+      console.error("[WASYS] Baileys npm install başlatılamadı:", result.error.message);
+    } else if (result.status !== 0) {
+      console.error(`[WASYS] Baileys npm install exit ${result.status}`);
+    }
+
+    if (!isInstalled()) {
+      console.error(
+        "[WASYS] Baileys hâlâ yok. hPanel → Redeploy (Entry file=server.js) ve npm install loglarını kontrol edin.",
+      );
+      return false;
+    }
+    console.log("[WASYS] Baileys kuruldu");
+  } else {
     try {
       const version = require(nmMarker).version;
       console.log(`[WASYS] Baileys hazır (v${version})`);
     } catch {
       console.log("[WASYS] Baileys hazır");
     }
-    syncVendorCopy();
-    return existsSync(vendorEntry) || isInstalled();
   }
 
-  console.warn(
-    `[WASYS] ${BAILEYS_SPEC} eksik — izole kurulum deneniyor (Hostinger node_modules budaması)`,
-  );
-
-  const result = installViaPrefix([BAILEYS_SPEC]);
-
-  if (result.error) {
-    console.error("[WASYS] Baileys npm install başlatılamadı:", result.error.message);
-  } else if (result.status !== 0) {
-    console.error(`[WASYS] Baileys npm install exit ${result.status}`);
-  }
-
-  if (!isInstalled()) {
-    console.error(
-      "[WASYS] Baileys hâlâ yok. hPanel → Redeploy (Entry file=server.js) ve npm install loglarını kontrol edin.",
-    );
-    return false;
-  }
-
-  console.log("[WASYS] Baileys kuruldu");
+  // Paket var ama protobufjs vb. budanmış olabilir — her boot'ta kontrol et.
+  const runtimeOk = ensureBaileysRuntimeDeps();
   syncVendorCopy();
-  return true;
+  return runtimeOk && (existsSync(vendorEntry) || isInstalled());
 }
 
 if (require.main === module) {
