@@ -5,6 +5,13 @@
 
 export const PACKAGE_NAME = "WASYS";
 
+/** Liste / referans fiyat (kullanıcı başı aylık, USD). */
+export const LIST_PRICE_PER_USER_USD = 30;
+/** Kurulum sonrası kullanıcı başı aylık (USD). */
+export const MONTHLY_PRICE_PER_USER_USD = 20;
+/** Tek seferlik kurulum ücreti (USD). */
+export const SETUP_FEE_USD = 50;
+
 /** Pakete dahil özellikler (pazarlama + paket sayfası). */
 export const PACKAGE_FEATURES = [
   "Ortak gelen kutusu",
@@ -19,8 +26,7 @@ export const PACKAGE_FEATURES = [
 ] as const;
 
 /**
- * Kullanıcı sayısına göre gösterim / teklif dilimleri.
- * Gerçek fiyat teklifle belirlenir; burada yalnızca ölçek vurgulanır.
+ * Kullanıcı sayısına göre gösterim dilimleri (eski UI / iç etiketler).
  */
 export const SEAT_TIERS = [
   {
@@ -29,7 +35,7 @@ export const SEAT_TIERS = [
     seatsHint: "Küçük ekipler",
     minUsers: 1,
     maxUsers: 5,
-    priceHint: "Teklif alın",
+    priceHint: `$${MONTHLY_PRICE_PER_USER_USD}/kullanıcı/ay`,
   },
   {
     id: "growth",
@@ -37,7 +43,7 @@ export const SEAT_TIERS = [
     seatsHint: "Büyüyen ekipler",
     minUsers: 6,
     maxUsers: 15,
-    priceHint: "Teklif alın",
+    priceHint: `$${MONTHLY_PRICE_PER_USER_USD}/kullanıcı/ay`,
     featured: true,
   },
   {
@@ -46,7 +52,7 @@ export const SEAT_TIERS = [
     seatsHint: "Ölçeklenen operasyonlar",
     minUsers: 16,
     maxUsers: null as number | null,
-    priceHint: "Teklif alın",
+    priceHint: `$${MONTHLY_PRICE_PER_USER_USD}/kullanıcı/ay`,
   },
 ] as const;
 

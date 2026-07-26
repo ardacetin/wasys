@@ -1,9 +1,21 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { CheckCircle2, Loader2, Send } from "lucide-react";
 
+function readUserCount(raw: string | null) {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return 1;
+  return Math.min(10000, Math.max(1, Math.round(n)));
+}
+
 export function QuoteForm() {
+  const searchParams = useSearchParams();
+  const defaultUsers = useMemo(
+    () => readUserCount(searchParams.get("users")),
+    [searchParams],
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -121,17 +133,18 @@ export function QuoteForm() {
         <label className="text-sm font-semibold text-ink sm:col-span-2">
           Kaç kullanıcı kullanacak?
           <input
+            key={defaultUsers}
             name="userCount"
             type="number"
             inputMode="numeric"
             min={1}
             max={10000}
             required
-            defaultValue={5}
+            defaultValue={defaultUsers}
             className="mt-1.5 min-h-12 w-full rounded-xl border border-line bg-white px-3.5 font-normal outline-none transition focus:border-brand focus:ring-4 focus:ring-brand/10"
           />
           <span className="mt-1.5 block text-xs font-normal text-ink-muted">
-            Fiyatlandırmayı belirleyen tek ölçü kullanıcı sayısıdır.
+            $20/kullanıcı/ay + $50 kurulum — fiyatlandırmayı kullanıcı sayısı belirler.
           </span>
         </label>
       </div>

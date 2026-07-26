@@ -1,7 +1,14 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { ArrowRight, BarChart3, Check, CheckCheck, Clock3, Headphones, Inbox, MessageCircleMore, QrCode, ShieldCheck, Sparkles, Tags, Users, Workflow } from "lucide-react";
+import { PricingCalculator } from "@/components/marketing/pricing-calculator";
 import { QuoteForm } from "@/components/marketing/quote-form";
-import { PACKAGE_FEATURES, SEAT_TIERS } from "@/lib/plans";
+import {
+  LIST_PRICE_PER_USER_USD,
+  MONTHLY_PRICE_PER_USER_USD,
+  PACKAGE_FEATURES,
+  SETUP_FEE_USD,
+} from "@/lib/plans";
 
 const features = [
   {
@@ -311,62 +318,13 @@ export default function HomePage() {
               Fiyatı belirleyen tek şey: kullanıcı sayısı
             </h2>
             <p className="mt-4 text-base leading-7 text-ink-muted">
-              Basic / Pro yok. Tüm özellikler herkese açık; ücretlendirme ekibinizdeki kullanıcı
-              kotasına göre yapılır.
+              Liste fiyatı ${LIST_PRICE_PER_USER_USD}/kullanıcı/ay. Kurulumda ${SETUP_FEE_USD}{" "}
+              tek seferlik ücret sonrası ${MONTHLY_PRICE_PER_USER_USD}/kullanıcı/ay — tüm
+              özellikler dahil.
             </p>
           </div>
 
-          <div className="mt-12 grid gap-5 lg:grid-cols-3">
-            {SEAT_TIERS.map((tier) => (
-              <article
-                key={tier.id}
-                className={`relative rounded-[1.75rem] border p-7 ${
-                  "featured" in tier && tier.featured
-                    ? "border-brand bg-brand-deep text-white shadow-[0_24px_70px_rgba(7,94,84,0.2)]"
-                    : "border-brand-deep/10 bg-white"
-                }`}
-              >
-                {"featured" in tier && tier.featured ? (
-                  <span className="absolute right-5 top-5 rounded-full bg-accent px-3 py-1 text-[11px] font-extrabold text-brand-deep">
-                    POPÜLER
-                  </span>
-                ) : null}
-                <p
-                  className={`text-sm font-bold ${
-                    "featured" in tier && tier.featured ? "text-brand-soft" : "text-brand"
-                  }`}
-                >
-                  {tier.seatsHint}
-                </p>
-                <h3 className="mt-3 font-[family-name:var(--font-display)] text-3xl">{tier.label}</h3>
-                <p
-                  className={`mt-3 text-sm leading-6 ${
-                    "featured" in tier && tier.featured ? "text-white/65" : "text-ink-muted"
-                  }`}
-                >
-                  Aynı paket, aynı özellikler. Kota büyüdükçe fiyatlandırma ölçeklenir.
-                </p>
-                <p
-                  className={`mt-6 text-lg font-bold ${
-                    "featured" in tier && tier.featured ? "text-accent" : "text-brand-deep"
-                  }`}
-                >
-                  {tier.priceHint}
-                </p>
-                <a
-                  href="#teklif"
-                  className={`mt-6 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl text-sm font-bold transition ${
-                    "featured" in tier && tier.featured
-                      ? "bg-accent text-brand-deep hover:bg-brand-soft"
-                      : "bg-brand text-white hover:bg-brand-deep"
-                  }`}
-                >
-                  Bu ölçek için teklif iste
-                  <ArrowRight size={16} />
-                </a>
-              </article>
-            ))}
-          </div>
+          <PricingCalculator />
 
           <div className="mt-10 rounded-[1.75rem] border border-brand-deep/10 bg-white p-7 sm:p-8">
             <h3 className="font-[family-name:var(--font-display)] text-2xl">Pakete dahil</h3>
@@ -414,7 +372,13 @@ export default function HomePage() {
               ))}
             </div>
           </div>
-          <QuoteForm />
+          <Suspense
+            fallback={
+              <div className="min-h-[28rem] animate-pulse rounded-[1.75rem] border border-white/70 bg-white" />
+            }
+          >
+            <QuoteForm />
+          </Suspense>
         </div>
       </section>
 
