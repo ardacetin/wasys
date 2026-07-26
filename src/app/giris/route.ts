@@ -28,7 +28,6 @@ const HTML = `<!DOCTYPE html>
     button:disabled { opacity:.6; cursor:wait; }
     .err { color:var(--danger); font-size:.875rem; margin-top:.75rem; }
     .warn { margin-top:1rem; padding:.75rem; border-radius:.75rem; background:#fde8e8; color:var(--danger); font-size:.875rem; }
-    .foot { margin-top:1.5rem; text-align:center; font-size:.875rem; color:var(--muted); }
     a { color:var(--brand); font-weight:700; text-decoration:none; }
   </style>
 </head>
@@ -37,9 +36,6 @@ const HTML = `<!DOCTYPE html>
     <div class="brand">WASYS</div>
     <h1>Giriş yap</h1>
     <p>Ekip gelen kutunuza devam edin.</p>
-    <div class="warn" style="background:#eef6f1;color:#084c37">
-      Dışarıdan kayıt kapalıdır. Yeni hesaplar WASYS yöneticisi tarafından oluşturulur.
-    </div>
     <div id="configWarn" class="warn" hidden>
       AUTH_SECRET eksik. Hostinger <code>nodejs/.env</code> dosyasını oluşturup uygulamayı Restart edin.
     </div>
@@ -53,7 +49,6 @@ const HTML = `<!DOCTYPE html>
       <div id="error" class="err" hidden></div>
       <button id="submit" type="submit">Giriş yap</button>
     </form>
-    <div class="foot">Hesabınız WASYS yöneticisi tarafından oluşturulur.</div>
   </div>
   <script>
     (function () {
