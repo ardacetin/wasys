@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 /** Deploy doğrulama — UI/log'da bu ID yoksa Hostinger eski gateway dosyasını çalıştırıyordur. */
-export const GATEWAY_LOADER_ID = "wa-runtime-2026-07-26p";
+export const GATEWAY_LOADER_ID = "wa-runtime-2026-07-26q";
 
 function getConnectedSessionForChannel(channelId) {
   if (!channelId) return null;
@@ -236,6 +236,9 @@ function resumeSessions() {
         status: "CONNECTING",
       };
       sessions.set(entry.sessionId, session);
+      console.log(
+        `[WASYS] WhatsApp resuming session ${entry.sessionId} (data=${DATA_ROOT})`,
+      );
       logger.info({ sessionId: entry.sessionId }, "resuming WhatsApp session");
       runStartSocket(session);
     }
@@ -508,6 +511,26 @@ function recordOutboundMessageStatus(session, messageId, status) {
   }
 }
 
+function rememberOutboundContent(session, messageId, content) {
+  if (!messageId || !content) return;
+  if (!session.outboundContentById) session.outboundContentById = new Map();
+  session.outboundContentById.set(messageId, content);
+  if (session.outboundContentById.size > 100) {
+    const first = session.outboundContentById.keys().next().value;
+    if (first) session.outboundContentById.delete(first);
+  }
+}
+
+function lookupStoredMessage(key) {
+  const id = key?.id;
+  if (!id) return undefined;
+  for (const session of sessions.values()) {
+    const content = session.outboundContentById?.get(id);
+    if (content) return content;
+  }
+  return undefined;
+}
+
 /** Baileys status: 2 = server ACK, 3 = delivered, 4 = read */
 function waitForOutboundStatus(session, sock, messageKey, minStatus, timeoutMs) {
   const id = messageKey?.id;
@@ -582,11 +605,16 @@ async function sendWithJidFallback(session, to, preferredJid, buildContent) {
         { sessionId: session.sessionId, jid, to, phone, loaderId: GATEWAY_LOADER_ID },
         "outbound WhatsApp send attempt",
       );
-      const result = await sock.sendMessage(jid, buildContent());
+      console.log(
+        `[WASYS] outbound send attempt session=${session.sessionId} jid=${jid} to=${to || "(lid-only)"} status=${session.status}`,
+      );
+      const content = buildContent();
+      const result = await sock.sendMessage(jid, content);
       const externalId = result?.key?.id;
       if (!externalId) {
         throw new Error("sendMessage kimlik (id) döndürmedi");
       }
+      rememberOutboundContent(session, externalId, content);
 
       if (phone && isLidJid(jid)) rememberLidMapping(phone, jid);
 
@@ -764,7 +792,7 @@ async function startSocket(session) {
     retryRequestDelayMs: 500,
     defaultQueryTimeoutMs: 60_000,
     // Yeniden gönderim / decrypt için gerekli; yoksa giden mesajlar "takılı" kalabiliyor
-    getMessage: async () => undefined,
+    getMessage: async (key) => lookupStoredMessage(key),
     emitOwnEvents: true,
   });
 
@@ -790,6 +818,9 @@ async function startSocket(session) {
       session.reconnectAttempt = 0;
       session.phoneNumber = sock.user?.id ? jidToPhone(sock.user.id) : undefined;
       saveRegistry();
+      console.log(
+        `[WASYS] WhatsApp CONNECTED session=${session.sessionId} phone=${session.phoneNumber ?? "?"}`,
+      );
       logger.info(
         { sessionId: session.sessionId, phone: session.phoneNumber },
         "WhatsApp connection open",
@@ -1088,9 +1119,19 @@ async function sendAudio(sessionId, to, audioUrl, ptt = true, jid, channelId) {
 }
 
 async function getChannelStatus(sessionId, channelId) {
-  const session = resolveLiveSession(sessionId, channelId);
+  let session = resolveLiveSession(sessionId, channelId);
   if (!session) {
     throw new Error("Session not found");
+  }
+  if (
+    session.status === "CONNECTING" ||
+    session.status === "QR_PENDING"
+  ) {
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline) {
+      if (session.status === "CONNECTED" && session.sock) break;
+      await new Promise((r) => setTimeout(r, 400));
+    }
   }
   return {
     status: session.status,

@@ -7,6 +7,18 @@ export async function register() {
     return;
   }
 
+  // server.js zaten wa-runtime + resumeSessions çalıştırır; burada ikinci kez
+  // yüklemek listen() uyarısı ve gönderim/oturum uyumsuzluğuna yol açabiliyor.
+  if (process.env.WASYS_GATEWAY_BOOT === "server.js") {
+    try {
+      await import("@/lib/gateway-webhook");
+      console.log("[WASYS] instrumentation: webhook bridge only (gateway via server.js)");
+    } catch (error) {
+      console.warn("[WASYS] instrumentation: gateway-webhook bridge failed", error);
+    }
+    return;
+  }
+
   try {
     const { ensureGateway } = await import("@/lib/wa-gateway");
     await ensureGateway();

@@ -197,6 +197,9 @@ const next = require("next");
 const port = Number(process.env.PORT || 3000);
 const hostname = process.env.HOSTNAME || "0.0.0.0";
 
+// instrumentation.ts gateway'i burada tekrar başlatmasın (çift listen / boş oturum haritası).
+process.env.WASYS_GATEWAY_BOOT = "server.js";
+
 const app = next({
   dev: false,
   hostname,
@@ -232,8 +235,9 @@ app
           const listening = globalThis.__wasysGateway
             ? Boolean(globalThis.__wasysGatewayHttpListening)
             : await startGateway();
+          const health = globalThis.__wasysGateway?.health?.();
           console.log(
-            `[WASYS] WhatsApp gateway ready loader=${GATEWAY_LOADER_ID || "?"} (in-process${listening ? ` + http://127.0.0.1:${process.env.GATEWAY_PORT || 4001}` : " only"})`,
+            `[WASYS] WhatsApp gateway ready loader=${GATEWAY_LOADER_ID || "?"} (in-process${listening ? ` + http://127.0.0.1:${process.env.GATEWAY_PORT || 4001}` : " only"}) sessions=${health?.sessions ?? "?"} connected=${health?.connectedSessions ?? "?"} data=${process.env.GATEWAY_DATA_DIR ?? "?"}`,
           );
 
           // gateway-webhook köprüsünü yükle (mesajların in-process işlenmesi)

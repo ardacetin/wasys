@@ -66,6 +66,7 @@ const globalStore = globalThis as {
   __wasysGatewayWebhook?: unknown;
   __wasysGatewayLastError?: string | null;
   __wasysGatewayLoaderId?: string;
+  __wasysGatewayHttpListening?: boolean;
 };
 
 /** Turbopack/webpack'in statik analizinden kaçınan gerçek runtime import. */
@@ -266,32 +267,30 @@ export const waGateway = {
     text: string;
     jid?: string | null;
   }) {
+    // Canlı soket server.js startGateway + HTTP ile aynı Map'te; önce HTTP dene.
+    if (globalStore.__wasysGatewayHttpListening) {
+      try {
+        const viaHttp = await gatewayHttp<{ externalId?: string; jid?: string }>(
+          "/messages/text",
+          {
+            method: "POST",
+            body: JSON.stringify(payload),
+            timeoutMs: 60000,
+          },
+        );
+        if (viaHttp?.externalId) return viaHttp;
+      } catch (error) {
+        if (error instanceof Error && !/abort|ECONNREFUSED|fetch failed/i.test(error.message)) {
+          throw error;
+        }
+      }
+    }
     if (globalStore.__wasysGateway) {
       const result = await globalStore.__wasysGateway.sendText(payload);
       if (!result?.externalId) {
         throw new Error("WhatsApp gönderimi kimlik döndürmedi");
       }
       return result;
-    }
-    try {
-      const viaHttp = await gatewayHttp<{ externalId?: string; jid?: string }>(
-        "/messages/text",
-        {
-          method: "POST",
-          body: JSON.stringify(payload),
-          timeoutMs: 60000,
-        },
-      );
-      if (viaHttp) {
-        if (!viaHttp.externalId) {
-          throw new Error("Gateway gönderdi ama mesaj kimliği yok");
-        }
-        return viaHttp;
-      }
-    } catch (error) {
-      if (error instanceof Error && !/abort|ECONNREFUSED|fetch failed/i.test(error.message)) {
-        throw error;
-      }
     }
     const ops = await ensureGateway();
     const result = await ops.sendText(payload);
@@ -309,32 +308,29 @@ export const waGateway = {
     ptt?: boolean;
     jid?: string | null;
   }) {
+    if (globalStore.__wasysGatewayHttpListening) {
+      try {
+        const viaHttp = await gatewayHttp<{ externalId?: string; jid?: string }>(
+          "/messages/audio",
+          {
+            method: "POST",
+            body: JSON.stringify(payload),
+            timeoutMs: 90000,
+          },
+        );
+        if (viaHttp?.externalId) return viaHttp;
+      } catch (error) {
+        if (error instanceof Error && !/abort|ECONNREFUSED|fetch failed/i.test(error.message)) {
+          throw error;
+        }
+      }
+    }
     if (globalStore.__wasysGateway) {
       const result = await globalStore.__wasysGateway.sendAudio(payload);
       if (!result?.externalId) {
         throw new Error("WhatsApp ses gönderimi kimlik döndürmedi");
       }
       return result;
-    }
-    try {
-      const viaHttp = await gatewayHttp<{ externalId?: string; jid?: string }>(
-        "/messages/audio",
-        {
-          method: "POST",
-          body: JSON.stringify(payload),
-          timeoutMs: 90000,
-        },
-      );
-      if (viaHttp) {
-        if (!viaHttp.externalId) {
-          throw new Error("Gateway gönderdi ama mesaj kimliği yok");
-        }
-        return viaHttp;
-      }
-    } catch (error) {
-      if (error instanceof Error && !/abort|ECONNREFUSED|fetch failed/i.test(error.message)) {
-        throw error;
-      }
     }
     const ops = await ensureGateway();
     const result = await ops.sendAudio(payload);
