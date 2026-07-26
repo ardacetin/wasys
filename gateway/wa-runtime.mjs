@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 /** Deploy doğrulama — UI/log'da bu ID yoksa Hostinger eski gateway dosyasını çalıştırıyordur. */
-export const GATEWAY_LOADER_ID = "wa-runtime-2026-07-26r";
+export const GATEWAY_LOADER_ID = "wa-runtime-2026-07-26s";
 
 function getConnectedSessionForChannel(channelId) {
   if (!channelId) return null;
@@ -481,8 +481,9 @@ async function resolveOutboundJid(sock, to, preferredJid) {
     logger.warn({ err, phone }, "onWhatsApp lookup failed");
   }
 
-  push(`${phone}@s.whatsapp.net`);
+  // onWhatsApp jid önce — sentetik PN bazen cihaz listesi çözemez
   if (onWaHit?.exists && onWaHit.jid) push(onWaHit.jid);
+  push(`${phone}@s.whatsapp.net`);
   if (preferred?.endsWith("@s.whatsapp.net") || preferred?.endsWith("@hosted")) {
     push(preferred);
   }
@@ -511,10 +512,23 @@ function recordOutboundMessageStatus(session, messageId, status) {
   }
 }
 
+/** Baileys getMessage proto.IMessage bekler; { text } retry'ı bozar. */
+function toProtoMessage(content) {
+  if (!content || typeof content !== "object") return undefined;
+  if (content.conversation || content.extendedTextMessage || content.audioMessage) {
+    return content;
+  }
+  if (typeof content.text === "string") {
+    return { conversation: content.text };
+  }
+  return undefined;
+}
+
 function rememberOutboundContent(session, messageId, content) {
   if (!messageId || !content) return;
   if (!session.outboundContentById) session.outboundContentById = new Map();
-  session.outboundContentById.set(messageId, content);
+  const protoMsg = toProtoMessage(content) ?? content;
+  session.outboundContentById.set(messageId, protoMsg);
   if (session.outboundContentById.size > 100) {
     const first = session.outboundContentById.keys().next().value;
     if (first) session.outboundContentById.delete(first);
@@ -531,6 +545,14 @@ function lookupStoredMessage(key) {
   return undefined;
 }
 
+function statusFromReceiptType(type) {
+  if (typeof type === "undefined") return 3; // DELIVERY_ACK
+  if (type === "sender") return 2; // SERVER_ACK
+  if (type === "played") return 5;
+  if (type === "read" || type === "read-self") return 4;
+  return null;
+}
+
 /** Baileys status: 2 = server ACK, 3 = delivered, 4 = read */
 function createOutboundStatusProbe(session, sock, minStatus, timeoutMs) {
   let watchedId = null;
@@ -538,33 +560,81 @@ function createOutboundStatusProbe(session, sock, minStatus, timeoutMs) {
   let settled = false;
   let finish = () => {};
 
+  const noteStatus = (st, source) => {
+    if (typeof st !== "number" || !watchedId) return;
+    maxStatus = Math.max(maxStatus, st);
+    recordOutboundMessageStatus(session, watchedId, st);
+    if (st >= minStatus) {
+      finish({ ok: true, maxStatus, source });
+    }
+  };
+
   const handler = (updates) => {
     if (!watchedId) return;
     for (const u of updates) {
       if (u.key?.id !== watchedId) continue;
       const st = u.update?.status;
-      if (typeof st !== "number") continue;
-      maxStatus = Math.max(maxStatus, st);
-      recordOutboundMessageStatus(session, watchedId, st);
-      if (st >= minStatus) finish({ ok: true, maxStatus });
+      if (typeof st === "number") noteStatus(st, "messages.update");
     }
   };
 
+  /** Event buffer takılı kalsa bile ham receipt'i yakala */
+  const onWsReceipt = (node) => {
+    if (!watchedId || !node?.attrs) return;
+    const ids = [node.attrs.id];
+    try {
+      const content = node.content;
+      if (Array.isArray(content) && content[0]) {
+        const items = (content[0].content || []).filter?.((c) => c?.tag === "item") || [];
+        for (const item of items) {
+          if (item?.attrs?.id) ids.push(item.attrs.id);
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    if (!ids.includes(watchedId)) return;
+    const st = statusFromReceiptType(node.attrs.type);
+    if (st != null) noteStatus(st, `ws.receipt:${node.attrs.type ?? "delivery"}`);
+  };
+
   if (sock?.ev?.on) sock.ev.on("messages.update", handler);
+  if (sock?.ws?.on) sock.ws.on("CB:receipt", onWsReceipt);
 
   const promise = new Promise((resolve) => {
     const timer = setTimeout(() => {
-      finish({ ok: maxStatus >= minStatus, maxStatus });
+      finish({ ok: maxStatus >= minStatus, maxStatus, source: "timeout" });
     }, timeoutMs);
+
+    const poll = setInterval(() => {
+      try {
+        sock?.ev?.flush?.();
+      } catch {
+        /* ignore */
+      }
+      if (!watchedId) return;
+      const cached = session?.outboundStatusById?.get(watchedId) ?? 0;
+      if (cached > maxStatus) noteStatus(cached, "status-cache");
+    }, 400);
 
     finish = (result) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearInterval(poll);
       try {
         sock?.ev?.off?.("messages.update", handler);
       } catch {
         /* ignore */
+      }
+      try {
+        sock?.ws?.off?.("CB:receipt", onWsReceipt);
+      } catch {
+        try {
+          sock?.ws?.removeListener?.("CB:receipt", onWsReceipt);
+        } catch {
+          /* ignore */
+        }
       }
       resolve(result);
     };
@@ -578,10 +648,10 @@ function createOutboundStatusProbe(session, sock, minStatus, timeoutMs) {
         maxStatus,
         session?.outboundStatusById?.get(messageId) ?? 0,
       );
-      if (maxStatus >= minStatus) finish({ ok: true, maxStatus });
+      if (maxStatus >= minStatus) finish({ ok: true, maxStatus, source: "prebind-cache" });
     },
     result: promise,
-    abort(reason = { ok: false, maxStatus: 0 }) {
+    abort(reason = { ok: false, maxStatus: 0, source: "abort" }) {
       finish(reason);
     },
   };
@@ -592,20 +662,35 @@ function createOutboundStatusProbe(session, sock, minStatus, timeoutMs) {
  * sessiz "SENT" üretiyordu — artık ACK yoksa başarısız sayılır.
  */
 async function sendAndConfirm(session, sock, jid, content, minStatus, timeoutMs) {
+  try {
+    sock?.ev?.flush?.();
+  } catch {
+    /* ignore */
+  }
+
+  try {
+    if (typeof sock.assertSessions === "function") {
+      await sock.assertSessions([jid], true);
+    }
+  } catch (err) {
+    logger.warn({ err, jid }, "assertSessions failed — continuing send");
+  }
+
   const probe = createOutboundStatusProbe(session, sock, minStatus, timeoutMs);
   try {
     const result = await sock.sendMessage(jid, content);
     const externalId = result?.key?.id;
     if (!externalId) {
-      probe.abort({ ok: false, maxStatus: 0 });
+      probe.abort({ ok: false, maxStatus: 0, source: "no-id" });
       throw new Error("sendMessage kimlik (id) döndürmedi");
     }
-    rememberOutboundContent(session, externalId, content);
+    // Retry için proto message sakla (ham {text} değil)
+    rememberOutboundContent(session, externalId, result.message ?? content);
     probe.bind(externalId);
     const wait = await probe.result;
     return { externalId, jid, wait, key: result.key };
   } catch (err) {
-    probe.abort({ ok: false, maxStatus: 0 });
+    probe.abort({ ok: false, maxStatus: 0, source: "error" });
     throw err;
   }
 }
@@ -660,7 +745,7 @@ async function sendWithJidFallback(session, to, preferredJid, buildContent) {
       if (!accepted) {
         if (isLidJid(jid)) sawLidDeliveryMiss = true;
         console.warn(
-          `[WASYS] outbound NO ACK session=${session.sessionId} jid=${jid} id=${externalId} maxStatus=${wait.maxStatus}`,
+          `[WASYS] outbound NO ACK session=${session.sessionId} jid=${jid} id=${externalId} maxStatus=${wait.maxStatus} source=${wait.source || "?"}`,
         );
         logger.warn(
           {
@@ -670,6 +755,7 @@ async function sendWithJidFallback(session, to, preferredJid, buildContent) {
             phone,
             maxStatus: wait.maxStatus,
             minStatus,
+            source: wait.source,
           },
           "send got id but no WhatsApp ACK — trying next jid",
         );
@@ -680,7 +766,7 @@ async function sendWithJidFallback(session, to, preferredJid, buildContent) {
       }
 
       console.log(
-        `[WASYS] outbound ACCEPTED session=${session.sessionId} jid=${jid} id=${externalId} maxStatus=${wait.maxStatus}`,
+        `[WASYS] outbound ACCEPTED session=${session.sessionId} jid=${jid} id=${externalId} maxStatus=${wait.maxStatus} source=${wait.source || "?"}`,
       );
       logger.info(
         { sessionId: session.sessionId, jid, externalId, maxStatus: wait.maxStatus },

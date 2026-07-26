@@ -310,7 +310,9 @@ export async function handleGatewayEvent(payload: any): Promise<GatewayWebhookRe
       autoReplyPhone,
       autoReplyJid,
     };
-    setImmediate(() => {
+    // Gelen mesaj işleme / Signal pipeline bitsin diye geciktir — aksi halde
+    // giden mesaj id alır ama receipt/ACK hiç düşmeyebilir.
+    setTimeout(() => {
       void runAutoReplies({
         organizationId: autoReplyCtx.organizationId,
         conversationId: autoReplyCtx.conversationId,
@@ -327,7 +329,7 @@ export async function handleGatewayEvent(payload: any): Promise<GatewayWebhookRe
       }).catch((err) => {
         console.error("[WASYS auto-reply]", err);
       });
-    });
+    }, 2000);
 
     return { status: 200, body: { ok: true } };
   }
