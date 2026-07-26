@@ -237,7 +237,9 @@ app
           const { startGateway, GATEWAY_LOADER_ID } = await import(
             `${pathToFileURL(runtimePath).href}?t=${bust}`
           );
-          const listening = await startGateway();
+          const listening = globalThis.__wasysGateway
+            ? Boolean(globalThis.__wasysGatewayHttpListening)
+            : await startGateway();
           console.log(
             `[WASYS] WhatsApp gateway ready loader=${GATEWAY_LOADER_ID || "?"} (in-process${listening ? ` + http://127.0.0.1:${process.env.GATEWAY_PORT || 4001}` : " only"})`,
           );

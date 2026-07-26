@@ -1176,89 +1176,101 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-export async function startGateway() {
+export function startGateway() {
   ensureAuthDir();
 
-  if (globalThis.__wasysGatewayListenStarted) {
-    return Boolean(globalThis.__wasysGatewayHttpListening);
+  if (globalThis.__wasysGatewayStartPromise) {
+    return globalThis.__wasysGatewayStartPromise;
   }
 
-  // İkinci import boş sessions Map ile global'i ezmesin (gönderim kırılıyor,
-  // gelen webhook eski sokette kalıyor).
-  if (
-    globalThis.__wasysGateway &&
-    globalThis.__wasysGatewayLoaderId &&
-    globalThis.__wasysGateway !== gatewayOps
-  ) {
-    logger.warn(
-      {
-        existing: globalThis.__wasysGatewayLoaderId,
-        incoming: GATEWAY_LOADER_ID,
-      },
-      "gateway already bound — keeping existing ops (skip overwrite)",
-    );
-    return Boolean(globalThis.__wasysGatewayHttpListening);
-  }
-
-  globalThis.__wasysGatewayListenStarted = true;
-
-  // Ops'u hemen kaydet — site boot'u Baileys yüklemesini beklememeli.
-  // İlk QR / session start getBaileys() ile lazy yükler.
-  globalThis.__wasysGateway = gatewayOps;
-  globalThis.__wasysGatewayLoaderId = GATEWAY_LOADER_ID;
-
-  void getBaileys()
-    .then(() => {
-      logger.info({ loaderId: GATEWAY_LOADER_ID }, "Baileys module loaded (lazy)");
-    })
-    .catch((error) => {
-      logger.error(
-        { err: error, loaderId: GATEWAY_LOADER_ID },
-        "Baileys preload failed (QR connect will retry)",
-      );
-    });
-
-  return new Promise((resolve) => {
-    let settled = false;
-    const settle = (listening) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(failSafe);
-      // Session resume Baileys ister; boot'u bloklamadan arka planda dene.
-      setImmediate(() => {
-        try {
-          resumeSessions();
-        } catch (err) {
-          logger.warn({ err }, "resumeSessions failed");
-        }
-      });
-      resolve(listening);
-    };
-
-    const failSafe = setTimeout(() => {
+  globalThis.__wasysGatewayStartPromise = (async () => {
+    // İkinci import boş sessions Map ile global'i ezmesin (gönderim kırılıyor,
+    // gelen webhook eski sokette kalıyor).
+    if (
+      globalThis.__wasysGateway &&
+      globalThis.__wasysGatewayLoaderId &&
+      globalThis.__wasysGateway !== gatewayOps
+    ) {
       logger.warn(
-        `Gateway HTTP listen timeout on :${PORT} — continuing in-process only`,
+        {
+          existing: globalThis.__wasysGatewayLoaderId,
+          incoming: GATEWAY_LOADER_ID,
+        },
+        "gateway already bound — keeping existing ops (skip overwrite)",
       );
-      settle(false);
-    }, 3000);
+      return Boolean(globalThis.__wasysGatewayHttpListening);
+    }
 
-    server.on("error", (err) => {
-      if (err.code === "EADDRINUSE") {
-        logger.warn(`Gateway port ${PORT} already in use — continuing in-process only`);
-      } else {
-        logger.warn(
-          { err },
-          `gateway HTTP port ${PORT} unavailable — continuing in-process only`,
+    // Ops'u hemen kaydet — site boot'u Baileys yüklemesini beklememeli.
+    // İlk QR / session start getBaileys() ile lazy yükler.
+    globalThis.__wasysGateway = gatewayOps;
+    globalThis.__wasysGatewayLoaderId = GATEWAY_LOADER_ID;
+
+    void getBaileys()
+      .then(() => {
+        logger.info({ loaderId: GATEWAY_LOADER_ID }, "Baileys module loaded (lazy)");
+      })
+      .catch((error) => {
+        logger.error(
+          { err: error, loaderId: GATEWAY_LOADER_ID },
+          "Baileys preload failed (QR connect will retry)",
         );
+      });
+
+    if (globalThis.__wasysGatewayHttpListening) {
+      return true;
+    }
+
+    return new Promise((resolve) => {
+      let settled = false;
+      const settle = (listening) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(failSafe);
+        setImmediate(() => {
+          try {
+            resumeSessions();
+          } catch (err) {
+            logger.warn({ err }, "resumeSessions failed");
+          }
+        });
+        resolve(listening);
+      };
+
+      const failSafe = setTimeout(() => {
+        logger.warn(
+          `Gateway HTTP listen timeout on :${PORT} — continuing in-process only`,
+        );
+        settle(false);
+      }, 3000);
+
+      server.on("error", (err) => {
+        if (err.code === "EADDRINUSE") {
+          logger.warn(`Gateway port ${PORT} already in use — continuing in-process only`);
+        } else {
+          logger.warn(
+            { err },
+            `gateway HTTP port ${PORT} unavailable — continuing in-process only`,
+          );
+        }
+        settle(false);
+      });
+
+      if (server.listening) {
+        globalThis.__wasysGatewayHttpListening = true;
+        settle(true);
+        return;
       }
-      settle(false);
+
+      server.listen(PORT, "127.0.0.1", () => {
+        globalThis.__wasysGatewayHttpListening = true;
+        logger.info(`WASYS WhatsApp gateway listening on 127.0.0.1:${PORT}`);
+        settle(true);
+      });
     });
-    server.listen(PORT, "127.0.0.1", () => {
-      globalThis.__wasysGatewayHttpListening = true;
-      logger.info(`WASYS WhatsApp gateway listening on 127.0.0.1:${PORT}`);
-      settle(true);
-    });
-  });
+  })();
+
+  return globalThis.__wasysGatewayStartPromise;
 }
 
 if (process.argv[1] && /wa-runtime\.mjs$/.test(process.argv[1])) {
