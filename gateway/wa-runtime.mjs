@@ -144,6 +144,30 @@ const REGISTRY_FILE = path.join(DATA_ROOT, "gateway-sessions.json");
 const LID_MAP_FILE = path.join(DATA_ROOT, "wa-lid-map.json");
 const logger = pino({ level: "info" });
 
+// #region agent log
+function agentDebugLog(location, message, data, hypothesisId, runId = "outbound") {
+  const payload = {
+    sessionId: "70991a",
+    runId,
+    hypothesisId,
+    location,
+    message,
+    data,
+    timestamp: Date.now(),
+  };
+  console.log(`[WASYS-DEBUG-70991a]`, JSON.stringify(payload));
+  try {
+    fs.mkdirSync(DATA_ROOT, { recursive: true });
+    fs.appendFileSync(
+      path.join(DATA_ROOT, "debug-70991a.ndjson"),
+      `${JSON.stringify(payload)}\n`,
+    );
+  } catch {
+    /* ignore */
+  }
+}
+// #endregion
+
 /** phoneDigits → @lid JID (iOS / Meta Ads sohbetleri için zorunlu) */
 const lidByPhone = new Map();
 
@@ -543,6 +567,21 @@ async function sendWithJidFallback(session, to, preferredJid, buildContent) {
   const { candidates, phone } = await resolveOutboundJid(sock, to, preferredJid);
   const jids = candidates;
 
+  // #region agent log
+  agentDebugLog(
+    "wa-runtime.mjs:sendWithJidFallback",
+    "jid candidates resolved",
+    {
+      sessionId: session.sessionId,
+      channelId: session.channelId,
+      candidateCount: jids.length,
+      jids: jids.map((j) => (j.includes("@") ? j.split("@")[1] : j)),
+      phoneLen: phone?.length ?? 0,
+    },
+    "B",
+  );
+  // #endregion
+
   let lastError;
 
   for (const jid of jids) {
@@ -562,6 +601,14 @@ async function sendWithJidFallback(session, to, preferredJid, buildContent) {
       // LID: sunucu id döner ama karşıya düşmeyebilir — teslimat (3+) bekle, yoksa sıradaki JID.
       if (isLidJid(jid)) {
         const delivered = await waitForOutboundStatus(sock, result.key, 3, 9000);
+        // #region agent log
+        agentDebugLog(
+          "wa-runtime.mjs:sendWithJidFallback",
+          "LID delivery wait result",
+          { jid, externalId, delivered },
+          "E",
+        );
+        // #endregion
         if (!delivered) {
           logger.warn(
             { sessionId: session.sessionId, jid, externalId, phone },
@@ -938,6 +985,21 @@ async function handleIncoming(session, msg, downloadMediaMessage) {
 
 async function ensureConnectedSession(sessionId, channelId) {
   let session = resolveLiveSession(sessionId, channelId);
+  // #region agent log
+  agentDebugLog(
+    "wa-runtime.mjs:ensureConnectedSession",
+    "session resolve",
+    {
+      requestedSessionId: sessionId,
+      channelId: channelId ?? null,
+      found: Boolean(session),
+      status: session?.status ?? null,
+      resolvedSessionId: session?.sessionId ?? null,
+      hasSock: Boolean(session?.sock),
+    },
+    "B",
+  );
+  // #endregion
   if (session?.sock && session.status === "CONNECTED") return session;
 
   // Bellekten düşmüş ama auth varsa yeniden ayağa kaldır

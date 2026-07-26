@@ -7,6 +7,7 @@
  */
 
 import { createRequire } from "node:module";
+import { agentDebugLog } from "@/lib/debug-agent-log";
 
 type GatewayOps = {
   health: () => { ok: boolean; sessions: number };
@@ -267,6 +268,20 @@ export const waGateway = {
     jid?: string | null;
   }) {
     if (globalStore.__wasysGateway) {
+      // #region agent log
+      agentDebugLog(
+        "wa-gateway.ts:sendText",
+        "gateway send path",
+        {
+          path: "in-process",
+          sessionId: payload.sessionId,
+          channelId: payload.channelId ?? null,
+          toLen: payload.to?.length ?? 0,
+          hasJid: Boolean(payload.jid),
+        },
+        "A",
+      );
+      // #endregion
       const result = await globalStore.__wasysGateway.sendText(payload);
       if (!result?.externalId) {
         throw new Error("WhatsApp gönderimi kimlik döndürmedi");
