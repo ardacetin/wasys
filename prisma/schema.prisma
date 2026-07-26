@@ -255,6 +255,7 @@ model Message {
 
   @@index([conversationId, createdAt])
   @@index([externalId])
+  @@index([createdAt])
 }
 
 model Tag {

@@ -98,6 +98,10 @@ export async function GET(request: NextRequest) {
   // Guard: hourly view is capped at 31 days worth of buckets.
   const maxBuckets = granularity === "hour" ? 24 * 31 : 400;
 
+  // Üst sınır: SQLite'ta tüm geçmişi RAM'e çekmek paneli kilitler
+  const MESSAGE_CAP = 12_000;
+  const CONVERSATION_CAP = 2_000;
+
   const [messages, conversationsInRange, users] = await Promise.all([
     prisma.message.findMany({
       where: {
@@ -111,6 +115,7 @@ export async function GET(request: NextRequest) {
         conversation: { select: { contactId: true } },
       },
       orderBy: { createdAt: "asc" },
+      take: MESSAGE_CAP,
     }),
     prisma.conversation.findMany({
       where: { organizationId: orgId, createdAt: { gte: from, lte: to } },
@@ -122,6 +127,8 @@ export async function GET(request: NextRequest) {
           select: { direction: true, sentById: true },
         },
       },
+      take: CONVERSATION_CAP,
+      orderBy: { createdAt: "desc" },
     }),
     prisma.user.findMany({
       where: { organizationId: orgId },

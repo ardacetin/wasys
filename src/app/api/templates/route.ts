@@ -14,8 +14,12 @@ export async function GET() {
   const templates = await prisma.messageTemplate.findMany({
     where: { organizationId: session.user.organizationId },
     orderBy: { title: "asc" },
+    select: { id: true, title: true, body: true, shortcut: true },
   });
-  return NextResponse.json({ templates });
+  return NextResponse.json(
+    { templates },
+    { headers: { "Cache-Control": "private, max-age=30" } },
+  );
 }
 
 const schema = z.object({

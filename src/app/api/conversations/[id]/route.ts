@@ -12,7 +12,7 @@ const sendSchema = z.object({
 });
 
 export async function GET(
-  _req: Request,
+  req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
   const session = await auth();
@@ -21,16 +21,98 @@ export async function GET(
   }
 
   const { id } = await ctx.params;
+  const { searchParams } = new URL(req.url);
+  const sinceRaw = searchParams.get("since");
+  const markRead = searchParams.get("markRead") !== "0";
+
+  // Hafif poll: yalnızca yeni mesajlar (tam sohbet yerine)
+  if (sinceRaw) {
+    const since = new Date(sinceRaw);
+    if (Number.isNaN(since.getTime())) {
+      return NextResponse.json({ error: "Geçersiz since" }, { status: 400 });
+    }
+
+    const owned = await prisma.conversation.findFirst({
+      where: { id, organizationId: session.user.organizationId },
+      select: { id: true, unreadCount: true },
+    });
+    if (!owned) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+
+    const messages = await prisma.message.findMany({
+      where: {
+        conversationId: id,
+        createdAt: { gt: since },
+      },
+      orderBy: { createdAt: "asc" },
+      take: 80,
+      select: {
+        id: true,
+        direction: true,
+        type: true,
+        status: true,
+        body: true,
+        mediaUrl: true,
+        createdAt: true,
+      },
+    });
+
+    if (markRead && owned.unreadCount > 0) {
+      await prisma.conversation.update({
+        where: { id },
+        data: { unreadCount: 0 },
+      });
+    }
+
+    return NextResponse.json({
+      messages,
+      serverTime: new Date().toISOString(),
+    });
+  }
+
   const conversation = await prisma.conversation.findFirst({
     where: { id, organizationId: session.user.organizationId },
-    include: {
-      contact: true,
-      channel: true,
+    select: {
+      id: true,
+      lastMessageAt: true,
+      lastMessagePreview: true,
+      unreadCount: true,
+      assignedToId: true,
+      contact: {
+        select: {
+          id: true,
+          name: true,
+          phone: true,
+          email: true,
+          waJid: true,
+        },
+      },
+      channel: {
+        select: {
+          id: true,
+          name: true,
+          type: true,
+          status: true,
+          sessionId: true,
+        },
+      },
       assignedTo: { select: { id: true, name: true, email: true } },
-      tags: { include: { tag: true } },
-      // En yeni 200 mesajı al (uzun sohbetlerde son mesajlar kaybolmasın),
-      // sonra ekranda kronolojik göstermek için ters çevir.
-      messages: { orderBy: { createdAt: "desc" }, take: 200 },
+      tags: { select: { tag: { select: { id: true, name: true, color: true } } } },
+      // En yeni 120 mesaj — panel poll'u için yeterli; daha hafif payload
+      messages: {
+        orderBy: { createdAt: "desc" },
+        take: 120,
+        select: {
+          id: true,
+          direction: true,
+          type: true,
+          status: true,
+          body: true,
+          mediaUrl: true,
+          createdAt: true,
+        },
+      },
     },
   });
 
@@ -40,14 +122,16 @@ export async function GET(
 
   conversation.messages.reverse();
 
-  if (conversation.unreadCount > 0) {
+  if (markRead && conversation.unreadCount > 0) {
     await prisma.conversation.update({
       where: { id },
       data: { unreadCount: 0 },
     });
   }
 
-  return NextResponse.json({ conversation: { ...conversation, unreadCount: 0 } });
+  return NextResponse.json({
+    conversation: { ...conversation, unreadCount: 0 },
+  });
 }
 
 export async function POST(

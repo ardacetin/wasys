@@ -2,31 +2,11 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 
-// Çevrimiçi tespiti için heartbeat: dakikada en fazla bir kez lastActiveAt güncelle
-const HEARTBEAT_THROTTLE_MS = 60 * 1000;
-const lastHeartbeat = new Map<string, number>();
-
-function touchUserActivity(userId: string) {
-  const now = Date.now();
-  const previous = lastHeartbeat.get(userId) ?? 0;
-  if (now - previous < HEARTBEAT_THROTTLE_MS) return;
-  lastHeartbeat.set(userId, now);
-  // updateMany: kayıt yoksa (eski oturum / silinmiş kullanıcı) hata fırlatmaz
-  prisma.user
-    .updateMany({
-      where: { id: userId },
-      data: { lastActiveAt: new Date() },
-    })
-    .catch(() => undefined);
-}
-
 export async function GET(req: Request) {
   const session = await auth();
   if (!session?.user?.organizationId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-
-  touchUserActivity(session.user.id);
 
   const { searchParams } = new URL(req.url);
   const tagId = searchParams.get("tagId");
@@ -50,15 +30,30 @@ export async function GET(req: Request) {
           }
         : {}),
     },
-    include: {
-      contact: true,
-      channel: true,
+    select: {
+      id: true,
+      lastMessageAt: true,
+      lastMessagePreview: true,
+      unreadCount: true,
+      contact: {
+        select: { id: true, name: true, phone: true, email: true },
+      },
+      channel: {
+        select: { id: true, name: true, type: true, status: true },
+      },
       assignedTo: { select: { id: true, name: true } },
-      tags: { include: { tag: true } },
+      tags: { select: { tag: { select: { id: true, name: true, color: true } } } },
     },
     orderBy: { lastMessageAt: "desc" },
-    take: 100,
+    take: 80,
   });
 
-  return NextResponse.json({ conversations });
+  return NextResponse.json(
+    { conversations },
+    {
+      headers: {
+        "Cache-Control": "private, no-cache",
+      },
+    },
+  );
 }

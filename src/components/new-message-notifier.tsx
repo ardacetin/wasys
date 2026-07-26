@@ -13,6 +13,7 @@ import {
   type BrowserNotificationPermission,
 } from "@/lib/browser-notifications";
 import { cn } from "@/lib/utils";
+import { startVisibleInterval } from "@/lib/visible-poll";
 
 type InboundEvent = {
   id: string;
@@ -24,7 +25,7 @@ type InboundEvent = {
   contactPhone: string;
 };
 
-const POLL_MS = 3_500;
+const POLL_MS = 6_000;
 
 function previewText(m: InboundEvent) {
   if (m.body?.trim()) {
@@ -117,18 +118,7 @@ export function MessageNotifyEngine({ enabled }: { enabled: boolean }) {
 
   useEffect(() => {
     if (!enabled || permission !== "granted") return;
-    void poll();
-    const t = setInterval(() => void poll(), POLL_MS);
-    return () => clearInterval(t);
-  }, [enabled, permission, poll]);
-
-  useEffect(() => {
-    if (!enabled || permission !== "granted") return;
-    const onVis = () => {
-      if (document.visibilityState === "visible") void poll();
-    };
-    document.addEventListener("visibilitychange", onVis);
-    return () => document.removeEventListener("visibilitychange", onVis);
+    return startVisibleInterval(() => void poll(), POLL_MS);
   }, [enabled, permission, poll]);
 
   // İzin yeni verildiğinde diğer tab/control tetikleyebilir

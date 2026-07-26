@@ -118,7 +118,9 @@ export const prisma =
     log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
   });
 
-if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
+// Production'da da tek istemci — Hostinger uzun yaşayan Node sürecinde
+// her import'ta yeni PrismaClient açılmasını engeller.
+globalForPrisma.prisma = prisma;
 
 /**
  * "The table `main.User` does not exist" → Prisma error P2021 (also P2010 when
@@ -300,13 +302,23 @@ async function ensureContactWaJidColumn() {
     await prisma.$executeRawUnsafe(
       `ALTER TABLE "Contact" ADD COLUMN "waJid" TEXT`,
     );
-    console.log('[WASYS DB] Contact.waJid column added');
+    console.log("[WASYS DB] Contact.waJid column added");
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     // duplicate column = already migrated
     if (!/duplicate column|already exists/i.test(message)) {
       // ignore — table may not exist yet (init.sql path handles it)
     }
+  }
+}
+
+async function ensureMessageCreatedAtIndex() {
+  try {
+    await prisma.$executeRawUnsafe(
+      `CREATE INDEX IF NOT EXISTS "Message_createdAt_idx" ON "Message"("createdAt")`,
+    );
+  } catch {
+    /* ignore */
   }
 }
 
@@ -317,6 +329,7 @@ async function runSelfHeal(): Promise<boolean> {
 
   if (await userTableExists()) {
     await ensureContactWaJidColumn();
+    await ensureMessageCreatedAtIndex();
     // Tablolar tamamsa da admin şifresini her açılışta .env değerine eşitle.
     // (Eskiden bunu bootstrap.mjs alt süreci yapıyordu; Hostinger'da alt
     // süreçler başarısız olabildiği için artık süreç içinde yapılıyor.)

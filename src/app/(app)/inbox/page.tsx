@@ -9,6 +9,7 @@ import {
   findExactShortcutTemplate,
 } from "@/lib/template-shortcuts";
 import { setActiveConversationId } from "@/lib/browser-notifications";
+import { startVisibleInterval } from "@/lib/visible-poll";
 import { cn, initials } from "@/lib/utils";
 
 function fillTemplate(
@@ -76,6 +77,9 @@ export default function InboxPage() {
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [shortcutHighlight, setShortcutHighlight] = useState(0);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const lastMessageAtRef = useRef<string | null>(null);
+  const selectedIdRef = useRef<string | null>(null);
+  selectedIdRef.current = selectedId;
 
   const slashSuggestions = useMemo(
     () => filterTemplatesBySlashQuery(templates, draft),
@@ -89,21 +93,55 @@ export default function InboxPage() {
     if (q) params.set("q", q);
     if (tagId) params.set("tagId", tagId);
     if (assigned) params.set("assigned", assigned);
-    const res = await fetch(`/api/conversations?${params}`);
+    const res = await fetch(`/api/conversations?${params}`, { cache: "no-store" });
     const data = await res.json();
     setConversations(data.conversations ?? []);
   }, [q, tagId, assigned]);
 
-  const loadConversation = useCallback(async (id: string) => {
-    const res = await fetch(`/api/conversations/${id}`);
+  const loadConversationFull = useCallback(async (id: string) => {
+    const res = await fetch(`/api/conversations/${id}`, { cache: "no-store" });
     const data = await res.json();
     if (!data.conversation) return;
+    const msgs = (data.conversation.messages ?? []) as Message[];
     setSelected(data.conversation);
-    setMessages(data.conversation.messages ?? []);
+    setMessages(msgs);
+    lastMessageAtRef.current = msgs.length
+      ? msgs[msgs.length - 1]!.createdAt
+      : new Date().toISOString();
     setConversations((prev) =>
       prev.map((c) => (c.id === id ? { ...c, unreadCount: 0 } : c)),
     );
   }, []);
+
+  /** Yalnızca yeni mesajları çek — 4 sn'de bir 120 mesaj yeniden indirmez. */
+  const loadConversationDelta = useCallback(async (id: string) => {
+    const since = lastMessageAtRef.current;
+    if (!since) {
+      await loadConversationFull(id);
+      return;
+    }
+    const res = await fetch(
+      `/api/conversations/${id}?since=${encodeURIComponent(since)}&markRead=1`,
+      { cache: "no-store" },
+    );
+    if (!res.ok) return;
+    const data = await res.json();
+    const incoming = (data.messages ?? []) as Message[];
+    if (!incoming.length) return;
+
+    setMessages((prev) => {
+      const seen = new Set(prev.map((m) => m.id));
+      const merged = [...prev];
+      for (const m of incoming) {
+        if (!seen.has(m.id)) merged.push(m);
+      }
+      return merged;
+    });
+    lastMessageAtRef.current = incoming[incoming.length - 1]!.createdAt;
+    setConversations((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, unreadCount: 0 } : c)),
+    );
+  }, [loadConversationFull]);
 
   useEffect(() => {
     void Promise.all([
@@ -119,18 +157,34 @@ export default function InboxPage() {
     });
   }, []);
 
+  // Liste: arama debounce + sekme gizliyken poll yok
   useEffect(() => {
-    void loadConversations();
-    const t = setInterval(() => void loadConversations(), 8000);
-    return () => clearInterval(t);
-  }, [loadConversations]);
+    let disposePoll: (() => void) | undefined;
+    const debounceMs = q.trim() ? 350 : 0;
+    const boot = window.setTimeout(() => {
+      disposePoll = startVisibleInterval(() => void loadConversations(), 12_000);
+    }, debounceMs);
+    return () => {
+      window.clearTimeout(boot);
+      disposePoll?.();
+    };
+  }, [loadConversations, q]);
 
+  // Açık sohbet: ilk tam yükleme, sonra hafif delta
   useEffect(() => {
-    if (!selectedId) return;
-    void loadConversation(selectedId);
-    const t = setInterval(() => void loadConversation(selectedId), 4000);
-    return () => clearInterval(t);
-  }, [selectedId, loadConversation]);
+    if (!selectedId) {
+      lastMessageAtRef.current = null;
+      setSelected(null);
+      setMessages([]);
+      return;
+    }
+    lastMessageAtRef.current = null;
+    void loadConversationFull(selectedId);
+    return startVisibleInterval(() => {
+      const id = selectedIdRef.current;
+      if (id) void loadConversationDelta(id);
+    }, 5_000, { runImmediately: false });
+  }, [selectedId, loadConversationFull, loadConversationDelta]);
 
   // Bildirim sistemi: açık sohbete bakarken aynı konuşma için spam atmasın
   useEffect(() => {
@@ -160,10 +214,19 @@ export default function InboxPage() {
         signal: controller.signal,
       }).finally(() => window.clearTimeout(timer));
 
-      const data = await res.json().catch(() => ({} as { message?: { status?: string }; error?: string }));
+      const data = await res.json().catch(
+        () =>
+          ({} as {
+            message?: Message & { status?: string };
+            error?: string;
+          }),
+      );
 
       if (data.message) {
-        setMessages((prev) => [...prev, data.message]);
+        setMessages((prev) => [...prev, data.message as Message]);
+        if (data.message.createdAt) {
+          lastMessageAtRef.current = data.message.createdAt;
+        }
         if (data.message.status === "SENT" || data.message.status === "DELIVERED") {
           setDraft("");
         }
@@ -226,7 +289,7 @@ export default function InboxPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ assignedToId: userId || null }),
     });
-    void loadConversation(selectedId);
+    void loadConversationFull(selectedId);
     void loadConversations();
   }
 
@@ -241,7 +304,7 @@ export default function InboxPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ tagIds: next }),
     });
-    void loadConversation(selected.id);
+    void loadConversationFull(selected.id);
     void loadConversations();
   }
 

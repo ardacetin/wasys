@@ -304,6 +304,9 @@ CREATE INDEX "Message_conversationId_createdAt_idx" ON "Message"("conversationId
 CREATE INDEX "Message_externalId_idx" ON "Message"("externalId");
 
 -- CreateIndex
+CREATE INDEX "Message_createdAt_idx" ON "Message"("createdAt");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "Tag_organizationId_name_key" ON "Tag"("organizationId", "name");
 
 -- CreateIndex

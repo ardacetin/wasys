@@ -19,12 +19,15 @@ export async function GET() {
     prisma.organization.findUnique({ where: { id: session.user.organizationId } }),
   ]);
 
-  return NextResponse.json({
-    users,
-    plan: org?.plan,
-    maxUsers: org?.maxUsers ?? 5,
-    me: { id: session.user.id, role: session.user.role },
-  });
+  return NextResponse.json(
+    {
+      users,
+      plan: org?.plan,
+      maxUsers: org?.maxUsers ?? 5,
+      me: { id: session.user.id, role: session.user.role },
+    },
+    { headers: { "Cache-Control": "private, max-age=20" } },
+  );
 }
 
 const schema = z.object({

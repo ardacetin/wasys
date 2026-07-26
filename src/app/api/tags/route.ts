@@ -13,8 +13,12 @@ export async function GET() {
   const tags = await prisma.tag.findMany({
     where: { organizationId: session.user.organizationId },
     orderBy: { name: "asc" },
+    select: { id: true, name: true, color: true },
   });
-  return NextResponse.json({ tags });
+  return NextResponse.json(
+    { tags },
+    { headers: { "Cache-Control": "private, max-age=30" } },
+  );
 }
 
 const schema = z.object({

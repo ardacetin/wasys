@@ -111,10 +111,11 @@ export function AppShell({
   useEffect(() => {
     if (isPlatformAdmin) return;
     const beat = () => {
+      if (document.visibilityState !== "visible") return;
       void fetch("/api/heartbeat", { method: "POST" }).catch(() => undefined);
     };
     beat();
-    const t = setInterval(beat, 60_000);
+    const t = setInterval(beat, 90_000);
     return () => clearInterval(t);
   }, [isPlatformAdmin]);
 
