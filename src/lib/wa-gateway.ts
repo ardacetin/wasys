@@ -6,6 +6,8 @@
  * server.js veya instrumentation.ts zaten başlattıysa globalThis kullanılır.
  */
 
+import { createRequire } from "node:module";
+
 type GatewayOps = {
   health: () => { ok: boolean; sessions: number };
   startSession: (payload: {
@@ -88,7 +90,6 @@ async function loadGatewayModule(): Promise<GatewayModule> {
   const { pathToFileURL } = await import("node:url");
   const { join } = await import("node:path");
   const { existsSync, statSync } = await import("node:fs");
-  const { createRequire } = await import("node:module");
 
   // Next instrumentation yolu: server.js atlandıysa da Baileys'i kurtar.
   try {

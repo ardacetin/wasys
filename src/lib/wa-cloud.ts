@@ -96,7 +96,7 @@ export async function verifyMetaSignature(
     const a = Buffer.from(expected, "utf8");
     const b = Buffer.from(received, "utf8");
     if (a.length !== b.length) return false;
-    return timingSafeEqual(a, b);
+    return timingSafeEqual(new Uint8Array(a), new Uint8Array(b));
   } catch {
     return false;
   }
