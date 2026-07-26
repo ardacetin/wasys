@@ -152,6 +152,16 @@ try {
   ensureBaileysInline();
 }
 
+// Vendor kopyası: gateway/wa-runtime.mjs node_modules'e ihtiyaç duymadan yüklenebilsin.
+try {
+  const ensure = require("./scripts/ensure-baileys.cjs");
+  if (typeof ensure.syncVendorCopy === "function") {
+    ensure.syncVendorCopy();
+  }
+} catch {
+  /* ensure script yoksa sessiz geç */
+}
+
 function prismaCli() {
   const cli = resolve(projectRoot, "node_modules/prisma/build/index.js");
   if (!existsSync(cli)) {
@@ -209,10 +219,21 @@ app
     // WhatsApp QR gateway (Baileys) runs inside the same process. Next talks to
     // it in-process via globalThis.__wasysGateway (HTTP on :4001 is optional).
     try {
-      const { startGateway } = await import("./gateway/server.mjs");
+      const { pathToFileURL } = require("node:url");
+      const { statSync } = require("node:fs");
+      const runtimePath = resolve(projectRoot, "gateway/wa-runtime.mjs");
+      if (!existsSync(runtimePath)) {
+        throw new Error(
+          `gateway/wa-runtime.mjs yok (${runtimePath}). Son main commit'i Redeploy edin.`,
+        );
+      }
+      const bust = statSync(runtimePath).mtimeMs;
+      const { startGateway, GATEWAY_LOADER_ID } = await import(
+        `${pathToFileURL(runtimePath).href}?t=${bust}`
+      );
       const listening = await startGateway();
       console.log(
-        `[WASYS] WhatsApp gateway ready (in-process${listening ? ` + http://127.0.0.1:${process.env.GATEWAY_PORT || 4001}` : " only"})`,
+        `[WASYS] WhatsApp gateway ready loader=${GATEWAY_LOADER_ID || "?"} (in-process${listening ? ` + http://127.0.0.1:${process.env.GATEWAY_PORT || 4001}` : " only"})`,
       );
     } catch (error) {
       console.error("[WASYS] WhatsApp gateway failed to start", error);

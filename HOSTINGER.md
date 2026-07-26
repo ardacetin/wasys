@@ -46,9 +46,12 @@ Uygulama açılışta eski dosyayı bir kez `wasys-data/` altına taşımaya ça
 
 ## WhatsApp / Baileys (`Cannot find package '@whiskeysockets/baileys'`)
 
-`server.js` açılışta ve `postinstall`/`npm run build` sırasında
-`scripts/ensure-baileys.cjs` paketi kontrol eder; yoksa `npm install
-@whiskeysockets/baileys@6.7.22` dener.
+Gateway artık `gateway/wa-runtime.mjs` üzerinden çalışır ve Baileys’i
+**bare import olmadan** `gateway/vendor/baileys` veya
+`node_modules/.../lib/index.js` mutlak yolundan yükler.
+
+`server.js` açılışta + `postinstall` / `npm run build` sırasında
+`scripts/ensure-baileys.cjs` paketi kurar ve vendor’a kopyalar.
 
 Hâlâ hata alıyorsanız:
 
@@ -60,11 +63,13 @@ Hâlâ hata alıyorsanız:
 ```bash
 export PATH="/opt/alt/alt-nodejs22/root/usr/bin:$PATH"
 cd ~/domains/wasys.pro/nodejs
+test -f gateway/wa-runtime.mjs && echo "runtime OK" || echo "ESKİ DEPLOY — Redeploy şart"
 npm install @whiskeysockets/baileys@6.7.22 --omit=dev --legacy-peer-deps
 node scripts/ensure-baileys.cjs
+ls gateway/vendor/baileys/lib/index.js
 ```
 
-5. Restart; logda `[WASYS] Baileys hazır` satırını arayın.
+5. Restart; logda `loader=wa-runtime-2026-07-26` ve `Baileys yüklendi` satırlarını arayın.
 
 **Error 14 / Unable to open the database file** = klasör yok veya yazma izni yok.
 File Manager veya SSH ile bir kez oluşturun:

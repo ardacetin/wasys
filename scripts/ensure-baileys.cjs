@@ -1,18 +1,29 @@
 /**
  * Hostinger Redeploy bazen node_modules'ü eksik bırakır veya Next izleme
  * Baileys'i budar. Gateway import'tan önce paketin varlığını doğrula;
- * yoksa npm ile yüklemeyi dene.
+ * yoksa npm ile yüklemeyi dene. Ayrıca gateway/vendor/baileys'e kopyala
+ * (bare package import'a hiç ihtiyaç kalmasın).
  */
 const { spawnSync } = require("node:child_process");
-const { existsSync } = require("node:fs");
+const {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  rmSync,
+} = require("node:fs");
 const { dirname, resolve } = require("node:path");
 
 const BAILEYS_SPEC = "@whiskeysockets/baileys@6.7.22";
 const projectRoot = resolve(__dirname, "..");
-const marker = resolve(
+const nmPackage = resolve(
   projectRoot,
-  "node_modules/@whiskeysockets/baileys/package.json",
+  "node_modules/@whiskeysockets/baileys",
 );
+const nmMarker = resolve(nmPackage, "package.json");
+const nmEntry = resolve(nmPackage, "lib/index.js");
+const vendorDir = resolve(projectRoot, "gateway/vendor/baileys");
+const vendorMarker = resolve(vendorDir, "package.json");
+const vendorEntry = resolve(vendorDir, "lib/index.js");
 
 function withNodeOnPath(env = process.env) {
   const nodeDir = dirname(process.execPath);
@@ -27,7 +38,6 @@ function resolveNpm() {
   const npmJs = resolve(nodeDir, "npm");
   if (existsSync(npmJs)) return { command: npmJs, prefixArgs: [] };
 
-  // alt-nodejs layouts: .../bin/node + .../lib/node_modules/npm/bin/npm-cli.js
   const candidates = [
     resolve(nodeDir, "../lib/node_modules/npm/bin/npm-cli.js"),
     resolve(nodeDir, "node_modules/npm/bin/npm-cli.js"),
@@ -44,18 +54,39 @@ function resolveNpm() {
 }
 
 function isInstalled() {
-  return existsSync(marker);
+  return existsSync(nmMarker) && existsSync(nmEntry);
+}
+
+function syncVendorCopy() {
+  if (!isInstalled()) return false;
+  try {
+    mkdirSync(resolve(projectRoot, "gateway/vendor"), { recursive: true });
+    rmSync(vendorDir, { recursive: true, force: true });
+    cpSync(nmPackage, vendorDir, { recursive: true, force: true });
+    if (existsSync(vendorEntry)) {
+      const version = require(vendorMarker).version;
+      console.log(`[WASYS] Baileys vendor kopyası hazır (v${version}) → ${vendorDir}`);
+      return true;
+    }
+  } catch (error) {
+    console.error(
+      "[WASYS] Baileys vendor kopyası başarısız:",
+      error instanceof Error ? error.message : error,
+    );
+  }
+  return false;
 }
 
 function ensureBaileysInstalled() {
   if (isInstalled()) {
     try {
-      const version = require(marker).version;
+      const version = require(nmMarker).version;
       console.log(`[WASYS] Baileys hazır (v${version})`);
     } catch {
       console.log("[WASYS] Baileys hazır");
     }
-    return true;
+    syncVendorCopy();
+    return existsSync(vendorEntry) || isInstalled();
   }
 
   console.warn(
@@ -93,6 +124,7 @@ function ensureBaileysInstalled() {
   }
 
   console.log("[WASYS] Baileys kuruldu");
+  syncVendorCopy();
   return true;
 }
 
@@ -100,4 +132,8 @@ if (require.main === module) {
   process.exit(ensureBaileysInstalled() ? 0 : 1);
 }
 
-module.exports = { ensureBaileysInstalled, isInstalled };
+module.exports = {
+  ensureBaileysInstalled,
+  isInstalled,
+  syncVendorCopy,
+};

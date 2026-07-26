@@ -3,7 +3,12 @@ import { dirname, isAbsolute, resolve } from "node:path";
 import { NextResponse } from "next/server";
 import { ensureDatabaseReady, isMissingTableError, prisma } from "@/lib/db";
 import { platformAdminEmails } from "@/lib/platform-admin";
-import { getGatewayLastError, isGatewayReady, probeGateway } from "@/lib/wa-gateway";
+import {
+  getGatewayLastError,
+  getGatewayLoaderId,
+  isGatewayReady,
+  probeGateway,
+} from "@/lib/wa-gateway";
 
 function maskEmail(email: string) {
   const [local, domain] = email.split("@");
@@ -220,6 +225,7 @@ export async function GET(req: Request) {
       whatsappGateway: {
         ready: gatewayProbe.ready,
         warmed: gatewayProbe.warmed,
+        loaderId: getGatewayLoaderId(),
         lastError: gatewayProbe.error ?? getGatewayLastError(),
         hint: gatewayProbe.ready
           ? null

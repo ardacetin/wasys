@@ -48,6 +48,7 @@ const globalStore = globalThis as {
   __wasysGatewayStart?: Promise<GatewayOps> | null;
   __wasysGatewayWebhook?: unknown;
   __wasysGatewayLastError?: string | null;
+  __wasysGatewayLoaderId?: string;
 };
 
 /** Turbopack/webpack'in statik analizinden kaçınan gerçek runtime import. */
@@ -85,22 +86,26 @@ async function loadGatewayModule(): Promise<GatewayModule> {
     console.warn("[WASYS] ensure-baileys atlandı", error);
   }
 
-  const baileysEntry = join(
-    process.cwd(),
-    "node_modules/@whiskeysockets/baileys/lib/index.js",
-  );
-  if (!existsSync(baileysEntry)) {
+  const baileysCandidates = [
+    join(process.cwd(), "gateway/vendor/baileys/lib/index.js"),
+    join(process.cwd(), "node_modules/@whiskeysockets/baileys/lib/index.js"),
+  ];
+  if (!baileysCandidates.some((entry) => existsSync(entry))) {
     throw new Error(
-      `Baileys kurulu değil: ${baileysEntry}. SSH: npm install @whiskeysockets/baileys@6.7.22 --omit=dev --legacy-peer-deps`,
+      `Baileys kurulu değil. Denenen: ${baileysCandidates.join(" | ")}. SSH: npm install @whiskeysockets/baileys@6.7.22 --omit=dev --legacy-peer-deps && node scripts/ensure-baileys.cjs`,
     );
   }
 
-  const gatewayPath = join(process.cwd(), "gateway", "server.mjs");
+  // Yeni dosya adı: Hostinger bazen eski gateway/server.mjs'i (bare import)
+  // güncellemeden bırakıyor. wa-runtime.mjs zorunlu.
+  const gatewayPath = join(process.cwd(), "gateway", "wa-runtime.mjs");
   if (!existsSync(gatewayPath)) {
-    throw new Error(`gateway/server.mjs bulunamadı: ${gatewayPath}`);
+    throw new Error(
+      `gateway/wa-runtime.mjs bulunamadı: ${gatewayPath}. Git'ten son main'i Redeploy edin (Entry file=server.js).`,
+    );
   }
 
-  // mtime ile cache bust — Hostinger'da eski gateway/server.mjs ESM cache'de kalmasın.
+  // mtime ile cache bust — Hostinger'da eski ESM cache kalmasın.
   const bust = statSync(gatewayPath).mtimeMs;
   return runtimeImport(`${pathToFileURL(gatewayPath).href}?t=${bust}`);
 }
@@ -132,7 +137,7 @@ export async function ensureGateway(): Promise<GatewayOps> {
         globalStore.__wasysGatewayLastError = detail;
         console.error("[WASYS] WhatsApp gateway start failed", error);
         throw new Error(
-          `WhatsApp servisi başlatılamadı: ${detail}. Entry file=server.js ile Redeploy edin; Baileys paketinin kurulu olduğundan emin olun.`,
+          `WhatsApp servisi başlatılamadı: ${detail}. Entry file=server.js ile son main'i Redeploy edin; SSH: node scripts/ensure-baileys.cjs`,
         );
       }
     })();
@@ -187,6 +192,10 @@ export function isGatewayReady() {
 
 export function getGatewayLastError() {
   return globalStore.__wasysGatewayLastError ?? null;
+}
+
+export function getGatewayLoaderId() {
+  return globalStore.__wasysGatewayLoaderId ?? null;
 }
 
 /** Health için: hazır değilse bir kez başlatmayı dene, sonucu raporla. */

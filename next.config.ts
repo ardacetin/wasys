@@ -14,6 +14,8 @@ const nextConfig: NextConfig = {
     "/*": [
       "./node_modules/@whiskeysockets/baileys/**/*",
       "./gateway/**/*",
+      "./gateway/vendor/baileys/**/*",
+      "./scripts/ensure-baileys.cjs",
     ],
   },
   // Hostinger CDN was caching RSC flight payloads for /login as if they were HTML.
