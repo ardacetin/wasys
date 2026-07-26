@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 /** Deploy doğrulama — UI/log'da bu ID yoksa Hostinger eski gateway dosyasını çalıştırıyordur. */
-export const GATEWAY_LOADER_ID = "wa-runtime-2026-07-26f";
+export const GATEWAY_LOADER_ID = "wa-runtime-2026-07-26g";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -311,6 +311,10 @@ function jidToPhone(jid) {
 
 /** LID (@lid) veya alternatif alanlardan gerçek telefonu çıkar. */
 function resolveSenderPhone(msg) {
+  const remoteLidUser = String(msg.key?.remoteJid ?? "").endsWith("@lid")
+    ? jidToPhone(msg.key.remoteJid).replace(/\D/g, "")
+    : "";
+
   const candidates = [
     msg.key?.senderPn,
     msg.key?.participantPn,
@@ -321,10 +325,13 @@ function resolveSenderPhone(msg) {
   for (const jid of candidates) {
     if (!jid || typeof jid !== "string") continue;
     if (jid.endsWith("@lid") || jid.endsWith("@g.us")) continue;
+    if (jid.endsWith("@hosted.lid")) continue;
     if (jid === "status@broadcast" || jid.endsWith("@broadcast")) continue;
     if (jid.endsWith("@newsletter")) continue;
     const phone = jidToPhone(jid).replace(/\D/g, "");
-    if (phone.length >= 8 && phone.length <= 15) return phone;
+    // LID kullanıcı id'sini telefon diye kaydetme (gönderim kırılır)
+    if (remoteLidUser && phone === remoteLidUser) continue;
+    if (phone.length >= 8 && phone.length <= 13) return phone;
   }
   return "";
 }
@@ -355,8 +362,41 @@ function normalizeUserJid(value) {
 }
 
 /**
- * Baileys 6.7.x: önce PN (@s.whatsapp.net), sonra bilinen sohbet JID / LID.
- * Yanlış @lid → "gönderildi" görünüp karşıda hiç düşmeme / waiting.
+ * Gerçek telefon (PN) çıkar. LID kullanıcı id'sini telefon sanma.
+ * Örn. 263144190545943@lid → phone diye kullanma.
+ */
+function extractRealPhone(to, preferredJid) {
+  const lidUser = (() => {
+    const n = normalizeUserJid(preferredJid);
+    if (n?.endsWith("@lid") || n?.endsWith("@hosted.lid")) {
+      return n.split("@")[0] ?? "";
+    }
+    return "";
+  })();
+
+  const raw = String(to ?? "").trim();
+  let phone = "";
+  if (raw.includes("@")) {
+    const n = normalizeUserJid(raw);
+    if (n?.endsWith("@s.whatsapp.net") || n?.endsWith("@hosted")) {
+      phone = n.split("@")[0] ?? "";
+    }
+  } else {
+    phone = raw.replace(/\D/g, "");
+  }
+
+  if (!phone) return "";
+  // LID id telefon gibi görünmesin
+  if (lidUser && phone === lidUser) return "";
+  // WhatsApp LID'leri genelde çok uzun; E.164 pratikte ≤13
+  if (phone.length < 8 || phone.length > 13) return "";
+  return phone;
+}
+
+/**
+ * Baileys 6.7.x: asıl hedef PN (@s.whatsapp.net).
+ * @lid yalnızca gerçek telefon yoksa veya PN send patlarsa yedek.
+ * ACK bekleme yok — messages.update çoğu kurulumda gelmiyor (yanlış "onay yok" hatası).
  */
 async function resolveOutboundJid(sock, to, preferredJid) {
   const candidates = [];
@@ -365,39 +405,25 @@ async function resolveOutboundJid(sock, to, preferredJid) {
     if (n && !candidates.includes(n)) candidates.push(n);
   };
 
-  const phone = String(to ?? preferredJid ?? "")
-    .split("@")[0]
-    .replace(/\D/g, "");
+  const phone = extractRealPhone(to, preferredJid);
+  const preferred = normalizeUserJid(preferredJid);
 
-  // 1) Klasik telefon JID (6.7 için en güvenli ilk deneme)
-  if (phone) push(`${phone}@s.whatsapp.net`);
-
-  // 2) Gelen sohbetten bilinen JID
-  push(preferredJid);
-
-  // 3) Kalıcı PN→LID
+  // 1) Gerçek telefon JID
   if (phone) {
-    const mapped = lidByPhone.get(phone);
-    if (mapped) push(mapped);
-  }
-
-  // 4) onWhatsApp
-  if (phone) {
+    push(`${phone}@s.whatsapp.net`);
     try {
       const results = await sock.onWhatsApp(phone);
       const hit = Array.isArray(results) ? results[0] : null;
       if (hit?.exists === false) {
         throw new Error(`Bu numara WhatsApp’ta yok: ${phone}`);
       }
-      if (hit?.exists) {
-        if (hit.jid) push(hit.jid);
-        if (hit.lid) {
-          const lidJid = String(hit.lid).includes("@")
-            ? String(hit.lid)
-            : `${hit.lid}@lid`;
-          push(lidJid);
-          rememberLidMapping(phone, lidJid);
-        }
+      if (hit?.exists && hit.jid) push(hit.jid);
+      // LID'yi burada aday yapma — 6.7'de sık "waiting for this message"
+      if (hit?.lid && phone) {
+        const lidJid = String(hit.lid).includes("@")
+          ? String(hit.lid)
+          : `${hit.lid}@lid`;
+        rememberLidMapping(phone, lidJid);
       }
     } catch (err) {
       if (err instanceof Error && /WhatsApp’ta yok/.test(err.message)) throw err;
@@ -405,44 +431,35 @@ async function resolveOutboundJid(sock, to, preferredJid) {
     }
   }
 
-  push(to);
+  // 2) Tercih edilen sohbet JID — LID ise telefonsuz senaryoda
+  if (preferred) {
+    if (preferred.endsWith("@s.whatsapp.net") || preferred.endsWith("@hosted")) {
+      push(preferred);
+    } else if (
+      (preferred.endsWith("@lid") || preferred.endsWith("@hosted.lid")) &&
+      !phone
+    ) {
+      push(preferred);
+    }
+  }
+
+  // 3) Kayıtlı LID yalnızca PN yoksa
+  if (!phone && preferred?.endsWith("@lid")) {
+    /* already pushed */
+  } else if (!candidates.length && preferred?.endsWith("@lid")) {
+    push(preferred);
+  }
+
+  if (!candidates.length && preferred?.endsWith("@lid")) {
+    push(preferred);
+  }
 
   if (!candidates.length) {
-    throw new Error("Geçersiz telefon / WhatsApp JID");
+    throw new Error(
+      "Geçersiz telefon / WhatsApp JID. Kişinin numarası LID olarak kaydolmuş olabilir — yeni bir gelen mesaj bekleyin veya CRM’den numarayı düzeltin.",
+    );
   }
-  return candidates;
-}
-
-/** SERVER_ACK (2+) gelmezse karşı tarafa düşmemiş say. */
-function waitForServerAck(sock, messageId, timeoutMs = 10000) {
-  if (!messageId) return Promise.resolve(false);
-  return new Promise((resolve) => {
-    let settled = false;
-    const finish = (ok) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      try {
-        sock.ev.off("messages.update", onUpdate);
-      } catch {
-        /* ignore */
-      }
-      resolve(ok);
-    };
-    const timer = setTimeout(() => finish(false), timeoutMs);
-    const onUpdate = (updates) => {
-      for (const u of updates ?? []) {
-        if (u?.key?.id !== messageId) continue;
-        const st = u?.update?.status;
-        // 2 SERVER_ACK, 3 DELIVERY, 4 READ
-        if (typeof st === "number" && st >= 2) {
-          finish(true);
-          return;
-        }
-      }
-    };
-    sock.ev.on("messages.update", onUpdate);
-  });
+  return { candidates, phone, lidFallback: preferred?.endsWith("@lid") ? preferred : null };
 }
 
 async function sendWithJidFallback(session, to, preferredJid, buildContent) {
@@ -457,14 +474,23 @@ async function sendWithJidFallback(session, to, preferredJid, buildContent) {
     /* ignore */
   }
 
-  const jids = await resolveOutboundJid(sock, to, preferredJid);
+  const { candidates, phone, lidFallback } = await resolveOutboundJid(
+    sock,
+    to,
+    preferredJid,
+  );
+  // PN denemeleri bittikten sonra (hepsi throw) LID'ye bir kez düş
+  const jids = [...candidates];
+  if (lidFallback && phone && !jids.includes(lidFallback)) {
+    jids.push(lidFallback);
+  }
+
   let lastError;
-  let lastNoAckJid;
 
   for (const jid of jids) {
     try {
       logger.info(
-        { sessionId: session.sessionId, jid, to, loaderId: GATEWAY_LOADER_ID },
+        { sessionId: session.sessionId, jid, to, phone, loaderId: GATEWAY_LOADER_ID },
         "outbound WhatsApp send attempt",
       );
       const result = await sock.sendMessage(jid, buildContent());
@@ -473,27 +499,18 @@ async function sendWithJidFallback(session, to, preferredJid, buildContent) {
         throw new Error("sendMessage kimlik (id) döndürmedi");
       }
 
-      const acked = await waitForServerAck(sock, externalId, 10000);
-      if (!acked) {
-        lastNoAckJid = jid;
-        logger.warn(
-          { sessionId: session.sessionId, jid, externalId },
-          "outbound send got no server ack — trying next jid",
-        );
-        continue;
-      }
+      if (phone && jid.endsWith("@lid")) rememberLidMapping(phone, jid);
 
-      const phone = String(to ?? "")
-        .split("@")[0]
-        .replace(/\D/g, "");
-      if (phone && (jid.endsWith("@lid") || jid.endsWith("@s.whatsapp.net"))) {
-        if (jid.endsWith("@lid")) rememberLidMapping(phone, jid);
-      }
+      // Başarılı kabul: Baileys id döndü. ACK event'i bekleme (false negative).
       logger.info(
         { sessionId: session.sessionId, jid, externalId },
-        "outbound WhatsApp send acked",
+        "outbound WhatsApp send accepted",
       );
-      return { externalId, jid, acked: true };
+      return {
+        externalId,
+        // UI/DB için mümkünse PN JID yaz (LID'yi waJid olarak dayatma)
+        jid: phone ? `${phone}@s.whatsapp.net` : jid,
+      };
     } catch (err) {
       lastError = err;
       logger.warn(
@@ -506,12 +523,6 @@ async function sendWithJidFallback(session, to, preferredJid, buildContent) {
         "outbound send failed for jid — trying next",
       );
     }
-  }
-
-  if (lastNoAckJid && !lastError) {
-    throw new Error(
-      `WhatsApp sunucu onayı gelmedi (son JID: ${lastNoAckJid}). Kanalı Yenile / yeniden QR ile bağlayın.`,
-    );
   }
 
   const detail =

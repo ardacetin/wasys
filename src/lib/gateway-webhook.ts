@@ -129,23 +129,50 @@ export async function handleGatewayEvent(payload: any): Promise<GatewayWebhookRe
 
   if (event === "message") {
     const phone = String(payload.from ?? "").replace(/\D/g, "");
-    if (!phone) return { status: 200, body: { ok: true } };
-
-    let contact = await prisma.contact.findUnique({
-      where: {
-        organizationId_phone: {
-          organizationId: channel.organizationId,
-          phone,
-        },
-      },
-    });
-
     const remoteJid =
       typeof payload.remoteJid === "string" && payload.remoteJid.includes("@")
         ? payload.remoteJid
         : null;
+    const lidUser =
+      remoteJid?.endsWith("@lid") || remoteJid?.endsWith("@hosted.lid")
+        ? remoteJid.split("@")[0] ?? ""
+        : "";
+
+    // LID id'sini telefon sanan eski kayıtları da bul / düzelt
+    let contact = phone
+      ? await prisma.contact.findUnique({
+          where: {
+            organizationId_phone: {
+              organizationId: channel.organizationId,
+              phone,
+            },
+          },
+        })
+      : null;
+
+    if (!contact && remoteJid) {
+      contact = await prisma.contact.findFirst({
+        where: {
+          organizationId: channel.organizationId,
+          waJid: remoteJid,
+        },
+      });
+    }
+
+    if (!contact && lidUser) {
+      contact = await prisma.contact.findFirst({
+        where: {
+          organizationId: channel.organizationId,
+          phone: lidUser,
+        },
+      });
+    }
 
     if (!contact) {
+      if (!phone || phone.length > 13) {
+        // Gerçek numara yok — sohbet açma (gönderim de çalışmaz)
+        return { status: 200, body: { ok: true, skipped: "no-phone" } };
+      }
       contact = await prisma.contact.create({
         data: {
           organizationId: channel.organizationId,
@@ -155,14 +182,36 @@ export async function handleGatewayEvent(payload: any): Promise<GatewayWebhookRe
         },
       });
     } else {
-      const patch: { name?: string; waJid?: string } = {};
+      const patch: { name?: string; waJid?: string; phone?: string } = {};
       if (payload.pushName && !contact.name) patch.name = payload.pushName;
       if (remoteJid && contact.waJid !== remoteJid) patch.waJid = remoteJid;
+      // Telefon alanı LID id ise gerçek numarayla düzelt
+      if (
+        phone &&
+        phone.length <= 13 &&
+        contact.phone !== phone &&
+        (contact.phone === lidUser || contact.phone.length > 13)
+      ) {
+        patch.phone = phone;
+      }
       if (Object.keys(patch).length) {
-        contact = await prisma.contact.update({
-          where: { id: contact.id },
-          data: patch,
-        });
+        try {
+          contact = await prisma.contact.update({
+            where: { id: contact.id },
+            data: patch,
+          });
+        } catch {
+          // unique çakışması — waJid güncellemesi yeterli
+          if (patch.waJid || patch.name) {
+            contact = await prisma.contact.update({
+              where: { id: contact.id },
+              data: {
+                ...(patch.name ? { name: patch.name } : {}),
+                ...(patch.waJid ? { waJid: patch.waJid } : {}),
+              },
+            });
+          }
+        }
       }
     }
 
