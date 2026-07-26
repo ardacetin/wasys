@@ -121,6 +121,9 @@ const logger = pino({ level: "info" });
  * @property {string=} phoneNumber
  * @property {string=} lastError
  * @property {any=} sock
+ * @property {boolean=} intentionalStop
+ * @property {number=} reconnectAttempt
+ * @property {ReturnType<typeof setTimeout>=} reconnectTimer
  */
 
 /** @type {Map<string, SessionState>} */
@@ -234,6 +237,27 @@ function jidToPhone(jid) {
   return jid.split("@")[0]?.split(":")[0] ?? jid;
 }
 
+function clearReconnectTimer(session) {
+  if (session.reconnectTimer) {
+    clearTimeout(session.reconnectTimer);
+    session.reconnectTimer = undefined;
+  }
+}
+
+function endSocketQuietly(sock) {
+  if (!sock) return;
+  try {
+    sock.ev?.removeAllListeners?.();
+  } catch {
+    /* ignore */
+  }
+  try {
+    sock.end?.(undefined);
+  } catch {
+    /* ignore */
+  }
+}
+
 async function startSocket(session) {
   const {
     makeWASocket,
@@ -243,12 +267,20 @@ async function startSocket(session) {
     downloadMediaMessage,
   } = await getBaileys();
 
+  // Çift socket = WhatsApp'ta conflict / hızlı kopma
+  clearReconnectTimer(session);
+  if (session.sock) {
+    endSocketQuietly(session.sock);
+    session.sock = null;
+  }
+
   ensureAuthDir();
   const authDir = path.join(AUTH_ROOT, session.sessionId);
   const { state, saveCreds } = await useMultiFileAuthState(authDir);
 
   session.status = "CONNECTING";
   session.lastError = undefined;
+  session.intentionalStop = false;
 
   let waVersion;
   try {
@@ -261,11 +293,16 @@ async function startSocket(session) {
   const sock = makeWASocket({
     version: waVersion,
     auth: state,
-    browser: ["WASYS", "Chrome", "1.0.0"],
+    // Gerçekçi tarayıcı kimliği — özel "WASYS" etiketi bazen daha çabuk düşürülür
+    browser: ["Ubuntu", "Chrome", "22.04.4"],
     logger: pino({ level: "silent" }),
     printQRInTerminal: false,
     syncFullHistory: false,
     markOnlineOnConnect: false,
+    keepAliveIntervalMs: 25_000,
+    connectTimeoutMs: 60_000,
+    retryRequestDelayMs: 500,
+    defaultQueryTimeoutMs: 60_000,
   });
 
   session.sock = sock;
@@ -287,8 +324,13 @@ async function startSocket(session) {
     if (connection === "open") {
       session.status = "CONNECTED";
       session.qrDataUrl = undefined;
+      session.reconnectAttempt = 0;
       session.phoneNumber = sock.user?.id ? jidToPhone(sock.user.id) : undefined;
       saveRegistry();
+      logger.info(
+        { sessionId: session.sessionId, phone: session.phoneNumber },
+        "WhatsApp connection open",
+      );
       await notifyWebhook(session, "connected", {
         status: session.status,
         phoneNumber: session.phoneNumber,
@@ -297,27 +339,85 @@ async function startSocket(session) {
 
     if (connection === "close") {
       const code = lastDisconnect?.error?.output?.statusCode;
-      const loggedOut = code === DisconnectReason.loggedOut;
-      session.status = "DISCONNECTED";
+      const errMsg = lastDisconnect?.error?.message ?? String(lastDisconnect?.error ?? "");
       session.qrDataUrl = undefined;
+      session.sock = null;
 
-      await notifyWebhook(session, "disconnected", {
-        status: session.status,
-        code,
-        shouldReconnect: !loggedOut,
-      });
-
-      if (loggedOut) {
-        try {
-          fs.rmSync(authDir, { recursive: true, force: true });
-        } catch {}
-        sessions.delete(session.sessionId);
-        saveRegistry();
-      } else {
-        setTimeout(() => {
-          void startSocket(session);
-        }, 2000);
+      if (session.intentionalStop) {
+        session.status = "DISCONNECTED";
+        session.lastError = undefined;
+        return;
       }
+
+      const fatal =
+        code === DisconnectReason.loggedOut ||
+        code === DisconnectReason.connectionReplaced ||
+        code === DisconnectReason.badSession ||
+        code === DisconnectReason.multideviceMismatch ||
+        code === DisconnectReason.forbidden;
+
+      if (fatal) {
+        session.status = "DISCONNECTED";
+        session.lastError =
+          code === DisconnectReason.connectionReplaced
+            ? "Bu numara başka bir yerde bağlandı (WhatsApp Web / başka cihaz). Tek oturum kullanın."
+            : code === DisconnectReason.loggedOut
+              ? "WhatsApp oturumu telefon üzerinden kapatıldı. Yeniden QR tarayın."
+              : `Bağlantı sonlandı (kod ${code}). Yeniden QR gerekebilir.`;
+
+        logger.warn(
+          { sessionId: session.sessionId, code, errMsg },
+          "WhatsApp fatal disconnect",
+        );
+
+        await notifyWebhook(session, "disconnected", {
+          status: session.status,
+          code,
+          shouldReconnect: false,
+          reason: session.lastError,
+        });
+
+        if (
+          code === DisconnectReason.loggedOut ||
+          code === DisconnectReason.badSession
+        ) {
+          try {
+            fs.rmSync(authDir, { recursive: true, force: true });
+          } catch {
+            /* ignore */
+          }
+          sessions.delete(session.sessionId);
+          saveRegistry();
+        }
+        return;
+      }
+
+      // Kısa kopma: UI'yi DISCONNECTED yapmadan yeniden bağlan
+      session.reconnectAttempt = (session.reconnectAttempt ?? 0) + 1;
+      const attempt = session.reconnectAttempt;
+      const delay = Math.min(60_000, 1_500 * 2 ** Math.min(attempt - 1, 5));
+      session.status = "CONNECTING";
+      session.lastError = `Yeniden bağlanılıyor… (deneme ${attempt}, kod ${code ?? "?"})`;
+
+      logger.warn(
+        { sessionId: session.sessionId, code, attempt, delay, errMsg },
+        "WhatsApp reconnect scheduled",
+      );
+
+      // İlk 2 kısa kopmada mail/spam tetikleme; sonra bildir
+      if (attempt >= 3) {
+        await notifyWebhook(session, "disconnected", {
+          status: "CONNECTING",
+          code,
+          shouldReconnect: true,
+          reason: session.lastError,
+        });
+      }
+
+      clearReconnectTimer(session);
+      session.reconnectTimer = setTimeout(() => {
+        void startSocket(session);
+      }, delay);
     }
   });
 
@@ -484,9 +584,14 @@ export const gatewayOps = {
 
   async stopSession(sessionId) {
     const session = sessions.get(sessionId);
+    if (session) {
+      session.intentionalStop = true;
+      clearReconnectTimer(session);
+    }
     if (session?.sock) {
       await session.sock.logout().catch(() => undefined);
-      session.sock.end(undefined);
+      endSocketQuietly(session.sock);
+      session.sock = null;
     }
     const authDir = path.join(AUTH_ROOT, sessionId);
     try {

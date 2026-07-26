@@ -44,6 +44,26 @@ GATEWAY_DATA_DIR=/home/u781807728/wasys-data
 Eski `nodejs/data/prod.db` yolu Redeploy sonrası müşteri verilerini siler.
 Uygulama açılışta eski dosyayı bir kez `wasys-data/` altına taşımaya çalışır.
 
+## WhatsApp QR bağlantısı sık kopuyorsa
+
+Baileys oturumu **Node süreci ayaktayken** canlı kalır. Kısa sürede düşmenin
+yaygın nedenleri:
+
+1. **Redeploy / Restart** — süreç ölünce soket iner (oturum dosyası kalır, genelde yeniden bağlanır).
+2. **Aynı numara başka yerde** — WhatsApp Web / başka telefon / ikinci WASYS kanalı → `connectionReplaced`.
+3. **`GATEWAY_DATA_DIR` yanlış** — oturum `nodejs/` içindeyse Redeploy siler. Olmalı:
+   `GATEWAY_DATA_DIR=/home/u781807728/wasys-data`
+4. Telefonda WhatsApp açık + internet; “Bağlı cihazlar”dan WASYS’i silmeyin.
+
+Kontrol:
+
+```bash
+ls /home/u781807728/wasys-data/gateway-auth/
+test -f /home/u781807728/wasys-data/gateway-sessions.json && echo registry OK
+```
+
+Gereksiz Redeploy yapmayın; yalnızca kod güncellemesinde Redeploy edin.
+
 ## WhatsApp / Baileys (`Cannot find package '@whiskeysockets/baileys'`)
 
 Gateway artık `gateway/wa-runtime.mjs` üzerinden çalışır ve Baileys’i
