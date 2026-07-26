@@ -169,6 +169,7 @@ if (require.main === module) {
 
 module.exports = {
   ensureBaileysInstalled,
+  ensureGatewayDeps,
   isInstalled,
   syncVendorCopy,
 };
