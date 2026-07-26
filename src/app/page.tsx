@@ -433,6 +433,9 @@ export default function HomePage() {
             <a href="#ozellikler" className="hover:text-white">Özellikler</a>
             <a href="#planlar" className="hover:text-white">Fiyatlandırma</a>
             <a href="#teklif" className="hover:text-white">Teklif al</a>
+            <Link href="/privacy-policy" className="hover:text-white">Gizlilik</Link>
+            <Link href="/terms" className="hover:text-white">Şartlar</Link>
+            <Link href="/user-data" className="hover:text-white">Veri silme</Link>
             <Link href="/giris" className="font-bold text-brand-soft hover:text-white">Giriş yap</Link>
           </div>
         </div>
