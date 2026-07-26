@@ -433,14 +433,24 @@ export default function HomePage() {
             <a href="#ozellikler" className="hover:text-white">Özellikler</a>
             <a href="#planlar" className="hover:text-white">Fiyatlandırma</a>
             <a href="#teklif" className="hover:text-white">Teklif al</a>
-            <Link href="/privacy-policy" className="hover:text-white">Gizlilik</Link>
-            <Link href="/terms" className="hover:text-white">Şartlar</Link>
-            <Link href="/user-data" className="hover:text-white">Veri silme</Link>
             <Link href="/giris" className="font-bold text-brand-soft hover:text-white">Giriş yap</Link>
           </div>
         </div>
-        <div className="border-t border-white/10 px-5 py-5 text-center text-xs text-white/35">
-          © {new Date().getFullYear()} WASYS. Tüm hakları saklıdır.
+        <div className="border-t border-white/10 px-5 py-5">
+          <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-3 text-xs text-white/35 sm:flex-row lg:px-3">
+            <p>© {new Date().getFullYear()} WASYS. Tüm hakları saklıdır.</p>
+            <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
+              <Link href="/privacy-policy" className="hover:text-white">
+                Gizlilik Politikası
+              </Link>
+              <Link href="/terms" className="hover:text-white">
+                Kullanım Şartları
+              </Link>
+              <Link href="/user-data" className="hover:text-white">
+                Kullanıcı Verisi Silme
+              </Link>
+            </div>
+          </div>
         </div>
       </footer>
     </main>

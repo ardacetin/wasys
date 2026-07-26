@@ -54,11 +54,20 @@ export function LegalPage({
 
       <footer className="border-t border-line py-8 text-center text-xs text-ink-muted">
         <p>© {new Date().getFullYear()} WASYS · wasys.pro</p>
-        <p className="mt-2">
+        <div className="mt-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
+          <Link href="/privacy-policy" className="hover:text-brand-deep">
+            Gizlilik Politikası
+          </Link>
+          <Link href="/terms" className="hover:text-brand-deep">
+            Kullanım Şartları
+          </Link>
+          <Link href="/user-data" className="hover:text-brand-deep">
+            Kullanıcı Verisi Silme
+          </Link>
           <a href="mailto:destek@wasys.pro" className="text-brand hover:underline">
             destek@wasys.pro
           </a>
-        </p>
+        </div>
       </footer>
     </main>
   );
