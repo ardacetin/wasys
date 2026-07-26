@@ -42,12 +42,6 @@ export function PricingCalculator() {
         </div>
       </div>
 
-      <p className="mt-4 text-sm leading-6 text-ink-muted">
-        ${SETUP_FEE_USD} tek seferlik kurulum sonrası{" "}
-        <strong className="text-ink">${MONTHLY_PRICE_PER_USER_USD}/kullanıcı/ay</strong>.
-        Tüm özellikler dahil.
-      </p>
-
       <div className="mt-8 rounded-2xl border border-brand-deep/10 bg-brand-soft/40 p-5">
         <p className="text-center text-xs font-bold uppercase tracking-[0.16em] text-brand">
           Kullanıcı sayısı

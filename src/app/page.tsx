@@ -3,12 +3,7 @@ import { Suspense } from "react";
 import { ArrowRight, BarChart3, Check, CheckCheck, Clock3, Headphones, Inbox, MessageCircleMore, QrCode, ShieldCheck, Sparkles, Tags, Users, Workflow } from "lucide-react";
 import { PricingCalculator } from "@/components/marketing/pricing-calculator";
 import { QuoteForm } from "@/components/marketing/quote-form";
-import {
-  LIST_PRICE_PER_USER_USD,
-  MONTHLY_PRICE_PER_USER_USD,
-  PACKAGE_FEATURES,
-  SETUP_FEE_USD,
-} from "@/lib/plans";
+import { PACKAGE_FEATURES } from "@/lib/plans";
 
 const features = [
   {
@@ -313,15 +308,10 @@ export default function HomePage() {
       <section id="planlar" className="scroll-mt-24 py-20 lg:py-28">
         <div className="mx-auto max-w-6xl px-5 lg:px-8">
           <div className="mx-auto max-w-3xl text-center">
-            <p className="text-xs font-bold uppercase tracking-[0.2em] text-brand">Tek paket</p>
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-brand">Fiyatlandırma</p>
             <h2 className="mt-3 font-[family-name:var(--font-display)] text-4xl tracking-tight sm:text-5xl">
-              Fiyatı belirleyen tek şey: kullanıcı sayısı
+              Tek paket
             </h2>
-            <p className="mt-4 text-base leading-7 text-ink-muted">
-              Liste fiyatı ${LIST_PRICE_PER_USER_USD}/kullanıcı/ay. Kurulumda ${SETUP_FEE_USD}{" "}
-              tek seferlik ücret sonrası ${MONTHLY_PRICE_PER_USER_USD}/kullanıcı/ay — tüm
-              özellikler dahil.
-            </p>
           </div>
 
           <PricingCalculator />
