@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 /** Deploy doğrulama — UI/log'da bu ID yoksa Hostinger eski gateway dosyasını çalıştırıyordur. */
-export const GATEWAY_LOADER_ID = "wa-runtime-2026-07-26d";
+export const GATEWAY_LOADER_ID = "wa-runtime-2026-07-26e";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -109,7 +109,49 @@ const SECRET = process.env.GATEWAY_SECRET ?? "wasys-gateway-secret";
 const DATA_ROOT = process.env.GATEWAY_DATA_DIR ?? path.join(process.cwd(), "data");
 const AUTH_ROOT = path.join(DATA_ROOT, "gateway-auth");
 const REGISTRY_FILE = path.join(DATA_ROOT, "gateway-sessions.json");
+const LID_MAP_FILE = path.join(DATA_ROOT, "wa-lid-map.json");
 const logger = pino({ level: "info" });
+
+/** phoneDigits → @lid JID (iOS / Meta Ads sohbetleri için zorunlu) */
+const lidByPhone = new Map();
+
+function loadLidMap() {
+  try {
+    if (!fs.existsSync(LID_MAP_FILE)) return;
+    const raw = JSON.parse(fs.readFileSync(LID_MAP_FILE, "utf8"));
+    if (!raw || typeof raw !== "object") return;
+    for (const [phone, jid] of Object.entries(raw)) {
+      if (phone && typeof jid === "string" && jid.endsWith("@lid")) {
+        lidByPhone.set(String(phone).replace(/\D/g, ""), jid);
+      }
+    }
+    logger.info({ count: lidByPhone.size }, "loaded PN→LID map");
+  } catch (err) {
+    logger.warn({ err }, "failed to load lid map");
+  }
+}
+
+function saveLidMap() {
+  try {
+    fs.mkdirSync(DATA_ROOT, { recursive: true });
+    const obj = Object.fromEntries(lidByPhone.entries());
+    fs.writeFileSync(LID_MAP_FILE, JSON.stringify(obj, null, 2));
+  } catch (err) {
+    logger.warn({ err }, "failed to persist lid map");
+  }
+}
+
+function rememberLidMapping(phone, remoteJid) {
+  const digits = String(phone ?? "").replace(/\D/g, "");
+  if (!digits || !remoteJid || typeof remoteJid !== "string") return;
+  if (!remoteJid.endsWith("@lid")) return;
+  const prev = lidByPhone.get(digits);
+  if (prev === remoteJid) return;
+  lidByPhone.set(digits, remoteJid);
+  saveLidMap();
+}
+
+loadLidMap();
 
 /**
  * @typedef {Object} SessionState
@@ -285,6 +327,125 @@ function resolveSenderPhone(msg) {
     if (phone.length >= 8 && phone.length <= 15) return phone;
   }
   return "";
+}
+
+function normalizeUserJid(value) {
+  if (!value || typeof value !== "string") return "";
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  if (trimmed.includes("@")) {
+    const at = trimmed.lastIndexOf("@");
+    const userPart = trimmed.slice(0, at);
+    const domain = trimmed.slice(at + 1);
+    if (
+      domain !== "lid" &&
+      domain !== "s.whatsapp.net" &&
+      domain !== "hosted" &&
+      domain !== "hosted.lid"
+    ) {
+      return "";
+    }
+    const user = userPart.split(":")[0];
+    if (!user) return "";
+    return `${user}@${domain}`;
+  }
+  const phone = trimmed.replace(/\D/g, "");
+  if (phone.length < 8 || phone.length > 15) return "";
+  return `${phone}@s.whatsapp.net`;
+}
+
+/**
+ * Gönderim JID'sini çöz: tercih edilen JID → kayıtlı LID → onWhatsApp LID → PN.
+ * iOS alıcılar çoğu zaman yalnızca @lid adreslemesini çözebiliyor.
+ */
+async function resolveOutboundJid(sock, to, preferredJid) {
+  const candidates = [];
+  const push = (jid) => {
+    const n = normalizeUserJid(jid);
+    if (n && !candidates.includes(n)) candidates.push(n);
+  };
+
+  // 1) Gelen sohbetten bilinen JID (çoğu zaman @lid)
+  push(preferredJid);
+
+  const phone = String(to ?? preferredJid ?? "")
+    .split("@")[0]
+    .replace(/\D/g, "");
+
+  // 2) Kalıcı PN→LID haritası
+  if (phone) {
+    const mapped = lidByPhone.get(phone);
+    if (mapped) push(mapped);
+  }
+
+  // 3) onWhatsApp ile canlı LID/PN
+  if (phone) {
+    try {
+      const results = await sock.onWhatsApp(phone);
+      const hit = Array.isArray(results) ? results[0] : null;
+      if (hit?.exists === false) {
+        throw new Error(`Bu numara WhatsApp’ta yok: ${phone}`);
+      }
+      if (hit?.exists) {
+        if (hit.lid) {
+          const lidJid = String(hit.lid).includes("@")
+            ? String(hit.lid)
+            : `${hit.lid}@lid`;
+          push(lidJid);
+          rememberLidMapping(phone, lidJid);
+        }
+        if (hit.jid) push(hit.jid);
+      }
+    } catch (err) {
+      if (err instanceof Error && /WhatsApp’ta yok/.test(err.message)) throw err;
+      logger.warn({ err, phone }, "onWhatsApp lookup failed");
+    }
+  }
+
+  // 4) Klasik PN JID + ham `to`
+  if (phone) push(`${phone}@s.whatsapp.net`);
+  push(to);
+
+  if (!candidates.length) {
+    throw new Error("Geçersiz telefon / WhatsApp JID");
+  }
+  return candidates;
+}
+
+async function sendWithJidFallback(session, to, preferredJid, buildContent) {
+  const sock = session.sock;
+  const jids = await resolveOutboundJid(sock, to, preferredJid);
+  let lastError;
+
+  for (const jid of jids) {
+    try {
+      logger.info(
+        { sessionId: session.sessionId, jid, to },
+        "outbound WhatsApp send attempt",
+      );
+      const result = await sock.sendMessage(jid, buildContent());
+      const phone = String(to ?? "")
+        .split("@")[0]
+        .replace(/\D/g, "");
+      if (phone && jid.endsWith("@lid")) rememberLidMapping(phone, jid);
+      return { externalId: result?.key?.id, jid };
+    } catch (err) {
+      lastError = err;
+      logger.warn(
+        {
+          err,
+          sessionId: session.sessionId,
+          jid,
+          to,
+        },
+        "outbound send failed for jid — trying next",
+      );
+    }
+  }
+
+  const detail =
+    lastError instanceof Error ? lastError.message : String(lastError ?? "send failed");
+  throw new Error(`WhatsApp gönderilemedi: ${detail}`);
 }
 
 function unwrapMessageContent(message) {
@@ -533,6 +694,13 @@ async function handleIncoming(session, msg, downloadMediaMessage) {
     return;
   }
 
+  // iOS / Meta Ads: cevap için PN→LID eşlemesini sakla
+  rememberLidMapping(from, remote);
+  const preferredChatJid =
+    normalizeUserJid(remote) ||
+    normalizeUserJid(msg.key?.senderPn) ||
+    `${from}@s.whatsapp.net`;
+
   const content = unwrapMessageContent(msg.message);
   if (!content) {
     // protocolMessage / revoke vb. — yoksay
@@ -593,6 +761,7 @@ async function handleIncoming(session, msg, downloadMediaMessage) {
 
   await notifyWebhook(session, "message", {
     from,
+    remoteJid: preferredChatJid,
     pushName,
     type,
     body,
@@ -603,8 +772,52 @@ async function handleIncoming(session, msg, downloadMediaMessage) {
 }
 
 async function ensureConnectedSession(sessionId) {
-  const session = sessions.get(sessionId);
+  let session = sessions.get(sessionId);
   if (session?.sock && session.status === "CONNECTED") return session;
+
+  // Bellekten düşmüş ama auth varsa yeniden ayağa kaldır
+  if (!session) {
+    const authDir = path.join(AUTH_ROOT, sessionId);
+    if (fs.existsSync(path.join(authDir, "creds.json"))) {
+      logger.warn({ sessionId }, "session missing in memory — hot-resuming for send");
+      let channelId = sessionId;
+      let webhookUrl = process.env.WEBHOOK_BASE_URL
+        ? `${process.env.WEBHOOK_BASE_URL}/api/webhooks/wa-gateway`
+        : `http://127.0.0.1:${process.env.PORT || 3000}/api/webhooks/wa-gateway`;
+      try {
+        if (fs.existsSync(REGISTRY_FILE)) {
+          const entries = JSON.parse(fs.readFileSync(REGISTRY_FILE, "utf8"));
+          const hit = Array.isArray(entries)
+            ? entries.find((e) => e?.sessionId === sessionId)
+            : null;
+          if (hit?.channelId) channelId = hit.channelId;
+          if (hit?.webhookUrl) webhookUrl = hit.webhookUrl;
+        }
+      } catch {
+        /* ignore */
+      }
+      session = {
+        channelId,
+        sessionId,
+        webhookUrl,
+        status: "CONNECTING",
+      };
+      sessions.set(sessionId, session);
+      await startSocket(session);
+    }
+  }
+
+  if (session?.sock && session.status === "CONNECTED") return session;
+
+  // Kısa süre CONNECTING ise open olmasını bekle
+  if (session && (session.status === "CONNECTING" || session.status === "QR_PENDING")) {
+    const deadline = Date.now() + 12_000;
+    while (Date.now() < deadline) {
+      if (session.sock && session.status === "CONNECTED") return session;
+      await new Promise((r) => setTimeout(r, 400));
+    }
+  }
+
   if (session && session.status !== "CONNECTED") {
     throw new Error(
       `WhatsApp oturumu bağlı değil (durum: ${session.status}). Kanallar’dan yeniden bağlanın.`,
@@ -615,30 +828,22 @@ async function ensureConnectedSession(sessionId) {
   );
 }
 
-async function sendText(sessionId, to, text) {
+async function sendText(sessionId, to, text, jid) {
   const session = await ensureConnectedSession(sessionId);
-  const phone = String(to).replace(/\D/g, "");
-  if (phone.length < 8) throw new Error("Geçersiz telefon numarası");
-  const jid = `${phone}@s.whatsapp.net`;
-  const result = await session.sock.sendMessage(jid, { text });
-  return { externalId: result?.key?.id };
+  return sendWithJidFallback(session, to, jid, () => ({ text }));
 }
 
-async function sendAudio(sessionId, to, audioUrl, ptt = true) {
+async function sendAudio(sessionId, to, audioUrl, ptt = true, jid) {
   const session = await ensureConnectedSession(sessionId);
-  const phone = String(to).replace(/\D/g, "");
-  if (phone.length < 8) throw new Error("Geçersiz telefon numarası");
-  const jid = `${phone}@s.whatsapp.net`;
   const localPath = audioUrl.startsWith("/")
     ? path.join(process.cwd(), "public", audioUrl.replace(/^\//, ""))
     : audioUrl;
   const buffer = fs.readFileSync(localPath);
-  const result = await session.sock.sendMessage(jid, {
+  return sendWithJidFallback(session, to, jid, () => ({
     audio: buffer,
     mimetype: "audio/ogg; codecs=opus",
     ptt,
-  });
-  return { externalId: result?.key?.id };
+  }));
 }
 
 export const gatewayOps = {
@@ -720,12 +925,12 @@ export const gatewayOps = {
     return { ok: true };
   },
 
-  async sendText({ sessionId, to, text }) {
-    return sendText(sessionId, to, text);
+  async sendText({ sessionId, to, text, jid }) {
+    return sendText(sessionId, to, text, jid);
   },
 
-  async sendAudio({ sessionId, to, audioUrl, ptt = true }) {
-    return sendAudio(sessionId, to, audioUrl, ptt);
+  async sendAudio({ sessionId, to, audioUrl, ptt = true, jid }) {
+    return sendAudio(sessionId, to, audioUrl, ptt, jid);
   },
 };
 

@@ -179,6 +179,8 @@ model Contact {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   name           String?
   phone          String
+  /// WhatsApp chat JID (örn. 905...@s.whatsapp.net veya ...@lid) — gönderimde tercih edilir
+  waJid          String?
   email          String?
   avatarUrl      String?
   notes          String?

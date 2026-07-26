@@ -73,6 +73,8 @@ export async function POST(
 
   let externalId: string | undefined;
   let status: "SENT" | "FAILED" | "PENDING" = "PENDING";
+  let sendError: string | undefined;
+  const preferredJid = conversation.contact.waJid ?? undefined;
 
   try {
     if (conversation.channel.type === "WHATSAPP_QR") {
@@ -87,15 +89,29 @@ export async function POST(
           sessionId: conversation.channel.sessionId,
           to: conversation.contact.phone,
           audioUrl: payload.mediaUrl,
+          jid: preferredJid,
         });
         externalId = result.externalId;
+        if (result.jid && result.jid !== preferredJid) {
+          await prisma.contact.update({
+            where: { id: conversation.contact.id },
+            data: { waJid: result.jid },
+          });
+        }
       } else {
         const result = await waGateway.sendText({
           sessionId: conversation.channel.sessionId,
           to: conversation.contact.phone,
           text: payload.body,
+          jid: preferredJid,
         });
         externalId = result.externalId;
+        if (result.jid && result.jid !== preferredJid) {
+          await prisma.contact.update({
+            where: { id: conversation.contact.id },
+            data: { waJid: result.jid },
+          });
+        }
       }
       status = "SENT";
     } else if (conversation.channel.type === "WHATSAPP_CLOUD") {
@@ -112,8 +128,9 @@ export async function POST(
       status = "SENT";
     }
   } catch (err) {
-    console.error(err);
+    console.error("[WASYS] outbound send failed", err);
     status = "FAILED";
+    sendError = err instanceof Error ? err.message : "Mesaj gönderilemedi";
   }
 
   const message = await prisma.message.create({
@@ -137,6 +154,13 @@ export async function POST(
       unreadCount: 0,
     },
   });
+
+  if (status === "FAILED") {
+    return NextResponse.json(
+      { message, error: sendError ?? "Mesaj gönderilemedi" },
+      { status: 502 },
+    );
+  }
 
   return NextResponse.json({ message });
 }

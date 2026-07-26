@@ -28,6 +28,7 @@ async function sendAutoReply(
   conversationId: string,
   phone: string,
   text: string,
+  jid?: string | null,
 ) {
   if (!channel.sessionId) return;
   try {
@@ -35,6 +36,7 @@ async function sendAutoReply(
       sessionId: channel.sessionId,
       to: phone,
       text,
+      jid: jid ?? undefined,
     });
     await prisma.message.create({
       data: {
@@ -138,19 +140,30 @@ export async function handleGatewayEvent(payload: any): Promise<GatewayWebhookRe
       },
     });
 
+    const remoteJid =
+      typeof payload.remoteJid === "string" && payload.remoteJid.includes("@")
+        ? payload.remoteJid
+        : null;
+
     if (!contact) {
       contact = await prisma.contact.create({
         data: {
           organizationId: channel.organizationId,
           phone,
           name: payload.pushName ?? phone,
+          ...(remoteJid ? { waJid: remoteJid } : {}),
         },
       });
-    } else if (payload.pushName && !contact.name) {
-      contact = await prisma.contact.update({
-        where: { id: contact.id },
-        data: { name: payload.pushName },
-      });
+    } else {
+      const patch: { name?: string; waJid?: string } = {};
+      if (payload.pushName && !contact.name) patch.name = payload.pushName;
+      if (remoteJid && contact.waJid !== remoteJid) patch.waJid = remoteJid;
+      if (Object.keys(patch).length) {
+        contact = await prisma.contact.update({
+          where: { id: contact.id },
+          data: patch,
+        });
+      }
     }
 
     let conversation = await prisma.conversation.findUnique({
@@ -229,7 +242,13 @@ export async function handleGatewayEvent(payload: any): Promise<GatewayWebhookRe
       contact,
       isNewConversation,
       send: (text) =>
-        sendAutoReply(channel, conversation.id, contact.phone, text),
+        sendAutoReply(
+          channel,
+          conversation.id,
+          contact.phone,
+          text,
+          contact.waJid,
+        ),
     });
 
     return { status: 200, body: { ok: true } };

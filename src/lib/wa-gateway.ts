@@ -29,13 +29,15 @@ type GatewayOps = {
     sessionId: string;
     to: string;
     text: string;
-  }) => Promise<{ externalId?: string }>;
+    jid?: string | null;
+  }) => Promise<{ externalId?: string; jid?: string }>;
   sendAudio: (payload: {
     sessionId: string;
     to: string;
     audioUrl: string;
     ptt?: boolean;
-  }) => Promise<{ externalId?: string }>;
+    jid?: string | null;
+  }) => Promise<{ externalId?: string; jid?: string }>;
 };
 
 type GatewayModule = {
@@ -170,6 +172,7 @@ export const waGateway = {
     sessionId: string;
     to: string;
     text: string;
+    jid?: string | null;
   }) {
     const ops = await ensureGateway();
     return ops.sendText(payload);
@@ -180,6 +183,7 @@ export const waGateway = {
     to: string;
     audioUrl: string;
     ptt?: boolean;
+    jid?: string | null;
   }) {
     const ops = await ensureGateway();
     return ops.sendAudio(payload);

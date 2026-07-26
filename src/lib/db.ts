@@ -295,12 +295,28 @@ async function bootstrapPlatformAdminInProcess(): Promise<void> {
   );
 }
 
+async function ensureContactWaJidColumn() {
+  try {
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE "Contact" ADD COLUMN "waJid" TEXT`,
+    );
+    console.log('[WASYS DB] Contact.waJid column added');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    // duplicate column = already migrated
+    if (!/duplicate column|already exists/i.test(message)) {
+      // ignore — table may not exist yet (init.sql path handles it)
+    }
+  }
+}
+
 async function runSelfHeal(): Promise<boolean> {
   const databaseUrl = process.env.DATABASE_URL?.trim();
   // Self-heal only applies to SQLite. Other providers use real migrations.
   if (!databaseUrl?.startsWith("file:")) return false;
 
   if (await userTableExists()) {
+    await ensureContactWaJidColumn();
     // Tablolar tamamsa da admin şifresini her açılışta .env değerine eşitle.
     // (Eskiden bunu bootstrap.mjs alt süreci yapıyordu; Hostinger'da alt
     // süreçler başarısız olabildiği için artık süreç içinde yapılıyor.)

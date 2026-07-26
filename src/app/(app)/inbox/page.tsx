@@ -155,14 +155,17 @@ export default function InboxPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ body, type, mediaUrl }),
     });
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     setSending(false);
     if (data.message) {
       setMessages((prev) => [...prev, data.message]);
-      setDraft("");
+      if (data.message.status !== "FAILED") {
+        setDraft("");
+      }
       void loadConversations();
-    } else if (data.error) {
-      alert(data.error);
+    }
+    if (data.error || data.message?.status === "FAILED") {
+      alert(data.error || "Mesaj WhatsApp’a iletilemedi. Kanal bağlantısını kontrol edin.");
     }
   }
 

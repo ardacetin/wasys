@@ -90,6 +90,7 @@ CREATE TABLE "Contact" (
     "organizationId" TEXT NOT NULL,
     "name" TEXT,
     "phone" TEXT NOT NULL,
+    "waJid" TEXT,
     "email" TEXT,
     "avatarUrl" TEXT,
     "notes" TEXT,
