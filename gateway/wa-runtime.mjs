@@ -1,12 +1,11 @@
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import qrcode from "qrcode";
-import pino from "pino";
 
 /** Deploy doğrulama — UI/log'da bu ID yoksa Hostinger eski gateway dosyasını çalıştırıyordur. */
-export const GATEWAY_LOADER_ID = "wa-runtime-2026-07-26";
+export const GATEWAY_LOADER_ID = "wa-runtime-2026-07-26b";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -29,6 +28,31 @@ function resolveProjectRoot() {
 }
 
 const PROJECT_ROOT = resolveProjectRoot();
+
+/**
+ * Hostinger'da gateway/ altından bare ESM import (qrcode/pino/baileys) sık
+ * bozuluyor. createRequire(projectRoot/package.json) ile mutlak çözümle.
+ */
+const requireFromRoot = createRequire(path.join(PROJECT_ROOT, "package.json"));
+
+function requireDependency(name, relativeEntry) {
+  const absolute = path.join(PROJECT_ROOT, "node_modules", relativeEntry);
+  if (fs.existsSync(absolute)) {
+    return requireFromRoot(absolute);
+  }
+  try {
+    return requireFromRoot(name);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `[${GATEWAY_LOADER_ID}] ${name} yok (${absolute}). ` +
+        `SSH: cd ~/domains/wasys.pro/nodejs && npm install ${name} --omit=dev --legacy-peer-deps && Restart. Detay: ${detail}`,
+    );
+  }
+}
+
+const qrcode = requireDependency("qrcode", "qrcode/lib/index.js");
+const pino = requireDependency("pino", "pino/pino.js");
 
 /**
  * Hostinger'da bare `@whiskeysockets/baileys` import'u sık bozuluyor / eski

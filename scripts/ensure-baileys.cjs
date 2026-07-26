@@ -77,7 +77,57 @@ function syncVendorCopy() {
   return false;
 }
 
+function npmInstall(specs) {
+  const npm = resolveNpm();
+  const args = [
+    ...npm.prefixArgs,
+    "install",
+    ...specs,
+    "--no-audit",
+    "--no-fund",
+    "--omit=dev",
+    "--legacy-peer-deps",
+  ];
+  return spawnSync(npm.command, args, {
+    cwd: projectRoot,
+    env: withNodeOnPath(),
+    stdio: "inherit",
+  });
+}
+
+function ensureGatewayDeps() {
+  const deps = [
+    {
+      name: "qrcode",
+      marker: resolve(projectRoot, "node_modules/qrcode/lib/index.js"),
+    },
+    {
+      name: "pino",
+      marker: resolve(projectRoot, "node_modules/pino/pino.js"),
+    },
+  ];
+  const missing = deps.filter((dep) => !existsSync(dep.marker)).map((d) => d.name);
+  if (missing.length === 0) {
+    console.log("[WASYS] Gateway deps hazır (qrcode, pino)");
+    return true;
+  }
+  console.warn(`[WASYS] Gateway deps eksik: ${missing.join(", ")} — kuruluyor…`);
+  const result = npmInstall(missing);
+  if (result.error) {
+    console.error("[WASYS] Gateway deps install başlatılamadı:", result.error.message);
+  }
+  const stillMissing = deps.filter((dep) => !existsSync(dep.marker)).map((d) => d.name);
+  if (stillMissing.length) {
+    console.error(`[WASYS] Gateway deps hâlâ yok: ${stillMissing.join(", ")}`);
+    return false;
+  }
+  console.log("[WASYS] Gateway deps kuruldu");
+  return true;
+}
+
 function ensureBaileysInstalled() {
+  ensureGatewayDeps();
+
   if (isInstalled()) {
     try {
       const version = require(nmMarker).version;
@@ -93,22 +143,7 @@ function ensureBaileysInstalled() {
     `[WASYS] ${BAILEYS_SPEC} eksik — kurulum deneniyor (Hostinger node_modules budaması / yarım install)`,
   );
 
-  const npm = resolveNpm();
-  const args = [
-    ...npm.prefixArgs,
-    "install",
-    BAILEYS_SPEC,
-    "--no-audit",
-    "--no-fund",
-    "--omit=dev",
-    "--legacy-peer-deps",
-  ];
-
-  const result = spawnSync(npm.command, args, {
-    cwd: projectRoot,
-    env: withNodeOnPath(),
-    stdio: "inherit",
-  });
+  const result = npmInstall([BAILEYS_SPEC]);
 
   if (result.error) {
     console.error("[WASYS] Baileys npm install başlatılamadı:", result.error.message);
