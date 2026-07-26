@@ -8,6 +8,7 @@ import {
   filterTemplatesBySlashQuery,
   findExactShortcutTemplate,
 } from "@/lib/template-shortcuts";
+import { setActiveConversationId } from "@/lib/browser-notifications";
 import { cn, initials } from "@/lib/utils";
 
 function fillTemplate(
@@ -130,6 +131,12 @@ export default function InboxPage() {
     const t = setInterval(() => void loadConversation(selectedId), 4000);
     return () => clearInterval(t);
   }, [selectedId, loadConversation]);
+
+  // Bildirim sistemi: açık sohbete bakarken aynı konuşma için spam atmasın
+  useEffect(() => {
+    setActiveConversationId(selectedId);
+    return () => setActiveConversationId(null);
+  }, [selectedId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });

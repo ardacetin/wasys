@@ -19,6 +19,7 @@ import {
   Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { NewMessageNotifier } from "@/components/new-message-notifier";
 
 const tenantLinks = [
   { href: "/inbox", label: "Gelen kutusu", icon: Inbox },
@@ -115,6 +116,7 @@ export function AppShell({
           <div className="mt-0.5 text-xs text-white/50">
             {isPlatformAdmin ? "Süper yönetici" : `${plan} paket`}
           </div>
+          {!isPlatformAdmin ? <NewMessageNotifier enabled /> : null}
           <button
             onClick={() => signOut({ callbackUrl: "/" })}
             className="mt-3 text-xs text-white/60 hover:text-white"
@@ -125,21 +127,26 @@ export function AppShell({
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-between border-b border-line bg-bg-elevated/80 px-4 py-3 backdrop-blur md:hidden">
-          <div className="font-[family-name:var(--font-display)] text-xl text-brand-deep">
-            WASYS
+        <header className="flex flex-col gap-2 border-b border-line bg-bg-elevated/80 px-4 py-3 backdrop-blur md:hidden">
+          <div className="flex items-center justify-between gap-3">
+            <div className="font-[family-name:var(--font-display)] text-xl text-brand-deep">
+              WASYS
+            </div>
+            <div className="flex max-w-[60%] gap-2 overflow-x-auto text-xs">
+              {visibleLinks.map((l) => (
+                <Link
+                  key={l.href}
+                  href={l.href}
+                  className="shrink-0 rounded-full border border-line px-3 py-1"
+                >
+                  {l.label}
+                </Link>
+              ))}
+            </div>
           </div>
-          <div className="flex gap-2 overflow-x-auto text-xs">
-            {visibleLinks.map((l) => (
-              <Link
-                key={l.href}
-                href={l.href}
-                className="rounded-full border border-line px-3 py-1"
-              >
-                {l.label}
-              </Link>
-            ))}
-          </div>
+          {!isPlatformAdmin ? (
+            <NewMessageNotifier enabled variant="light" />
+          ) : null}
         </header>
         <main className="min-h-0 flex-1">{children}</main>
       </div>
