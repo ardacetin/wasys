@@ -44,6 +44,28 @@ GATEWAY_DATA_DIR=/home/u781807728/wasys-data
 Eski `nodejs/data/prod.db` yolu Redeploy sonrası müşteri verilerini siler.
 Uygulama açılışta eski dosyayı bir kez `wasys-data/` altına taşımaya çalışır.
 
+## WhatsApp / Baileys (`Cannot find package '@whiskeysockets/baileys'`)
+
+`server.js` açılışta ve `postinstall`/`npm run build` sırasında
+`scripts/ensure-baileys.cjs` paketi kontrol eder; yoksa `npm install
+@whiskeysockets/baileys@6.7.22` dener.
+
+Hâlâ hata alıyorsanız:
+
+1. Entry file = `server.js`
+2. Build command = `npm run build`
+3. hPanel → **Redeploy** (yalnızca Restart yetmeyebilir)
+4. SSH (PATH’e Node ekleyerek):
+
+```bash
+export PATH="/opt/alt/alt-nodejs22/root/usr/bin:$PATH"
+cd ~/domains/wasys.pro/nodejs
+npm install @whiskeysockets/baileys@6.7.22 --omit=dev --legacy-peer-deps
+node scripts/ensure-baileys.cjs
+```
+
+5. Restart; logda `[WASYS] Baileys hazır` satırını arayın.
+
 **Error 14 / Unable to open the database file** = klasör yok veya yazma izni yok.
 File Manager veya SSH ile bir kez oluşturun:
 

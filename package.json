@@ -13,7 +13,7 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:bootstrap": "node prisma/run-production.mjs bootstrap",
     "db:studio": "prisma studio",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate && node scripts/ensure-baileys.cjs"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

@@ -9,6 +9,13 @@ const nextConfig: NextConfig = {
     "pino",
     "pino-pretty",
   ],
+  // Hostinger / NFT prune Baileys'i atmasın (yalnızca gateway'den import edilir).
+  outputFileTracingIncludes: {
+    "/*": [
+      "./node_modules/@whiskeysockets/baileys/**/*",
+      "./gateway/**/*",
+    ],
+  },
   // Hostinger CDN was caching RSC flight payloads for /login as if they were HTML.
   // Force private/no-store on app routes so document navigations always get real HTML.
   async headers() {

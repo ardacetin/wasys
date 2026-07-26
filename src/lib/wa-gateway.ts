@@ -72,6 +72,15 @@ async function loadGatewayModule(): Promise<GatewayModule> {
   const { pathToFileURL } = await import("node:url");
   const { join } = await import("node:path");
   const { existsSync } = await import("node:fs");
+  const { createRequire } = await import("node:module");
+
+  // Next instrumentation yolu: server.js atlandıysa da Baileys'i kurtar.
+  try {
+    const require = createRequire(join(process.cwd(), "package.json"));
+    require("./scripts/ensure-baileys.cjs").ensureBaileysInstalled();
+  } catch (error) {
+    console.warn("[WASYS] ensure-baileys atlandı", error);
+  }
 
   const gatewayPath = join(process.cwd(), "gateway", "server.mjs");
   if (!existsSync(gatewayPath)) {

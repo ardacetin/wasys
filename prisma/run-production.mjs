@@ -56,6 +56,7 @@ run(process.execPath, [resolve(projectRoot, "prisma/prepare-db.mjs")]);
 
 if (mode === "build") {
   run(process.execPath, [prismaCli(), "generate"]);
+  run(process.execPath, [resolve(projectRoot, "scripts/ensure-baileys.cjs")]);
 }
 
 run(process.execPath, [prismaCli(), "db", "push"]);

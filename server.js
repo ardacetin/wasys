@@ -89,6 +89,14 @@ try {
   console.error("[WASYS] persistent path setup failed", error);
 }
 
+// WhatsApp QR (Baileys) — Hostinger bazen node_modules'ten düşürür; gateway
+// import edilmeden önce zorunlu bağımlılığı doğrula / kur.
+try {
+  require("./scripts/ensure-baileys.cjs").ensureBaileysInstalled();
+} catch (error) {
+  console.error("[WASYS] Baileys doğrulama hatası", error);
+}
+
 function prismaCli() {
   const cli = resolve(projectRoot, "node_modules/prisma/build/index.js");
   if (!existsSync(cli)) {
