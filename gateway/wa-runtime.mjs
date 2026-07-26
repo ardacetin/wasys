@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 /** Deploy doğrulama — UI/log'da bu ID yoksa Hostinger eski gateway dosyasını çalıştırıyordur. */
-export const GATEWAY_LOADER_ID = "wa-runtime-2026-07-26q";
+export const GATEWAY_LOADER_ID = "wa-runtime-2026-07-26r";
 
 function getConnectedSessionForChannel(channelId) {
   if (!channelId) return null;
@@ -532,52 +532,82 @@ function lookupStoredMessage(key) {
 }
 
 /** Baileys status: 2 = server ACK, 3 = delivered, 4 = read */
-function waitForOutboundStatus(session, sock, messageKey, minStatus, timeoutMs) {
-  const id = messageKey?.id;
-  if (!id || !sock?.ev?.on) {
-    return Promise.resolve({ ok: false, maxStatus: 0 });
-  }
+function createOutboundStatusProbe(session, sock, minStatus, timeoutMs) {
+  let watchedId = null;
+  let maxStatus = 0;
+  let settled = false;
+  let finish = () => {};
 
-  let maxStatus = session?.outboundStatusById?.get(id) ?? 0;
-  if (maxStatus >= minStatus) {
-    return Promise.resolve({ ok: true, maxStatus });
-  }
+  const handler = (updates) => {
+    if (!watchedId) return;
+    for (const u of updates) {
+      if (u.key?.id !== watchedId) continue;
+      const st = u.update?.status;
+      if (typeof st !== "number") continue;
+      maxStatus = Math.max(maxStatus, st);
+      recordOutboundMessageStatus(session, watchedId, st);
+      if (st >= minStatus) finish({ ok: true, maxStatus });
+    }
+  };
 
-  return new Promise((resolve) => {
-    let settled = false;
-    const finish = (result) => {
+  if (sock?.ev?.on) sock.ev.on("messages.update", handler);
+
+  const promise = new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      finish({ ok: maxStatus >= minStatus, maxStatus });
+    }, timeoutMs);
+
+    finish = (result) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       try {
-        sock.ev.off("messages.update", handler);
+        sock?.ev?.off?.("messages.update", handler);
       } catch {
         /* ignore */
       }
       resolve(result);
     };
-
-    const handler = (updates) => {
-      for (const u of updates) {
-        if (u.key?.id !== id) continue;
-        const st = u.update?.status;
-        if (typeof st === "number") {
-          maxStatus = Math.max(maxStatus, st);
-          recordOutboundMessageStatus(session, id, st);
-          if (st >= minStatus) {
-            finish({ ok: true, maxStatus });
-            return;
-          }
-        }
-      }
-    };
-
-    sock.ev.on("messages.update", handler);
-    const timer = setTimeout(
-      () => finish({ ok: maxStatus >= minStatus, maxStatus }),
-      timeoutMs,
-    );
   });
+
+  return {
+    /** sendMessage sonrası hemen çağır — ACK race kaçmasın */
+    bind(messageId) {
+      watchedId = messageId;
+      maxStatus = Math.max(
+        maxStatus,
+        session?.outboundStatusById?.get(messageId) ?? 0,
+      );
+      if (maxStatus >= minStatus) finish({ ok: true, maxStatus });
+    },
+    result: promise,
+    abort(reason = { ok: false, maxStatus: 0 }) {
+      finish(reason);
+    },
+  };
+}
+
+/**
+ * sendMessage + sunucu ACK (status≥2). Baileys id dönüp mesajın düşmemesi
+ * sessiz "SENT" üretiyordu — artık ACK yoksa başarısız sayılır.
+ */
+async function sendAndConfirm(session, sock, jid, content, minStatus, timeoutMs) {
+  const probe = createOutboundStatusProbe(session, sock, minStatus, timeoutMs);
+  try {
+    const result = await sock.sendMessage(jid, content);
+    const externalId = result?.key?.id;
+    if (!externalId) {
+      probe.abort({ ok: false, maxStatus: 0 });
+      throw new Error("sendMessage kimlik (id) döndürmedi");
+    }
+    rememberOutboundContent(session, externalId, content);
+    probe.bind(externalId);
+    const wait = await probe.result;
+    return { externalId, jid, wait, key: result.key };
+  } catch (err) {
+    probe.abort({ ok: false, maxStatus: 0 });
+    throw err;
+  }
 }
 
 async function sendWithJidFallback(session, to, preferredJid, buildContent) {
@@ -609,55 +639,51 @@ async function sendWithJidFallback(session, to, preferredJid, buildContent) {
         `[WASYS] outbound send attempt session=${session.sessionId} jid=${jid} to=${to || "(lid-only)"} status=${session.status}`,
       );
       const content = buildContent();
-      const result = await sock.sendMessage(jid, content);
-      const externalId = result?.key?.id;
-      if (!externalId) {
-        throw new Error("sendMessage kimlik (id) döndürmedi");
-      }
-      rememberOutboundContent(session, externalId, content);
+      // En az sunucu ACK (2) şart. Sadece Baileys id ile SENT = sessiz sahte başarıydı.
+      const wantDelivery = isLidJid(jid) || lidPreferredChat || sawLidDeliveryMiss;
+      const minStatus = wantDelivery ? 3 : 2;
+      const timeoutMs = wantDelivery ? 12000 : 8000;
+      const { externalId, wait } = await sendAndConfirm(
+        session,
+        sock,
+        jid,
+        content,
+        minStatus,
+        timeoutMs,
+      );
 
       if (phone && isLidJid(jid)) rememberLidMapping(phone, jid);
 
-      // LID: sunucu id döner ama karşıya düşmeyebilir — teslimat (3+) bekle, yoksa sıradaki JID.
-      if (isLidJid(jid)) {
-        const wait = await waitForOutboundStatus(session, sock, result.key, 3, 9000);
-        const acceptLid =
-          wait.ok ||
-          wait.maxStatus >= 2 ||
-          (wait.maxStatus === 0 && Boolean(externalId));
-        if (!acceptLid) {
-          sawLidDeliveryMiss = true;
-          logger.warn(
-            { sessionId: session.sessionId, jid, externalId, phone, maxStatus: wait.maxStatus },
-            "LID send got id but no ACK/delivery — trying next jid",
-          );
-          continue;
-        }
-        if (wait.maxStatus === 0) {
-          logger.info(
-            { sessionId: session.sessionId, jid, externalId, phone },
-            "LID send accepted on Baileys id (no status event within wait)",
-          );
-        }
-      } else if (lidPreferredChat || sawLidDeliveryMiss) {
-        const wait = await waitForOutboundStatus(session, sock, result.key, 3, 12000);
-        if (!wait.ok) {
-          logger.warn(
-            {
-              sessionId: session.sessionId,
-              jid,
-              externalId,
-              phone,
-              maxStatus: wait.maxStatus,
-            },
-            "PN send got id but no delivery in LID chat — trying next jid",
-          );
-          continue;
-        }
+      // Teslimat (3) gelmese bile sunucu ACK (2) gerçek gönderim kanıtı.
+      const accepted = wait.maxStatus >= 2;
+
+      if (!accepted) {
+        if (isLidJid(jid)) sawLidDeliveryMiss = true;
+        console.warn(
+          `[WASYS] outbound NO ACK session=${session.sessionId} jid=${jid} id=${externalId} maxStatus=${wait.maxStatus}`,
+        );
+        logger.warn(
+          {
+            sessionId: session.sessionId,
+            jid,
+            externalId,
+            phone,
+            maxStatus: wait.maxStatus,
+            minStatus,
+          },
+          "send got id but no WhatsApp ACK — trying next jid",
+        );
+        lastError = new Error(
+          `WhatsApp sunucu onayı gelmedi (jid=${jid}, maxStatus=${wait.maxStatus})`,
+        );
+        continue;
       }
 
+      console.log(
+        `[WASYS] outbound ACCEPTED session=${session.sessionId} jid=${jid} id=${externalId} maxStatus=${wait.maxStatus}`,
+      );
       logger.info(
-        { sessionId: session.sessionId, jid, externalId },
+        { sessionId: session.sessionId, jid, externalId, maxStatus: wait.maxStatus },
         "outbound WhatsApp send accepted",
       );
       return {
@@ -666,6 +692,9 @@ async function sendWithJidFallback(session, to, preferredJid, buildContent) {
       };
     } catch (err) {
       lastError = err;
+      console.error(
+        `[WASYS] outbound jid failed session=${session.sessionId} jid=${jid} err=${err instanceof Error ? err.message : String(err)}`,
+      );
       logger.warn(
         {
           err,
@@ -684,6 +713,9 @@ async function sendWithJidFallback(session, to, preferredJid, buildContent) {
 
   const detail =
     lastError instanceof Error ? lastError.message : String(lastError ?? "send failed");
+  console.error(
+    `[WASYS] outbound FAILED session=${session.sessionId} status=${session.status} to=${to || "-"} jid=${preferredJid || "-"} detail=${detail}`,
+  );
   logger.error(
     {
       err: lastError,

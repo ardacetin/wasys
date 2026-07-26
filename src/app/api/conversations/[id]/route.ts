@@ -168,6 +168,15 @@ export async function POST(
 
   const sendPhone = normalizeWhatsAppPhone(conversation.contact.phone);
 
+  console.log("[WASYS] panel outbound start", {
+    conversationId: conversation.id,
+    channelType: conversation.channel.type,
+    channelStatus: conversation.channel.status,
+    sessionId: conversation.channel.sessionId,
+    to: sendPhone,
+    jid: preferredJid,
+  });
+
   try {
     if (conversation.channel.type === "WHATSAPP_QR") {
       if (!conversation.channel.sessionId || conversation.channel.status !== "CONNECTED") {
@@ -308,6 +317,13 @@ export async function POST(
       lastMessagePreview: payload.body.slice(0, 140),
       unreadCount: 0,
     },
+  });
+
+  console.log("[WASYS] panel outbound done", {
+    conversationId: conversation.id,
+    status,
+    externalId: externalId ?? null,
+    error: sendError ?? null,
   });
 
   if (status === "FAILED") {

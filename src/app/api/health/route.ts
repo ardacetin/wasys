@@ -227,6 +227,29 @@ export async function GET(req: Request) {
         warmed: gatewayProbe.warmed,
         loaderId: getGatewayLoaderId(),
         lastError: gatewayProbe.error ?? getGatewayLastError(),
+        ...(await (async () => {
+          try {
+            if (!gatewayProbe.ready) return {};
+            const { ensureGateway } = await import("@/lib/wa-gateway");
+            const ops = await ensureGateway();
+            const h = ops.health?.() as
+              | {
+                  sessions?: number;
+                  connectedSessions?: number;
+                  sessionSummary?: unknown;
+                  loaderId?: string;
+                }
+              | undefined;
+            return {
+              loaderId: h?.loaderId ?? getGatewayLoaderId(),
+              sessions: h?.sessions ?? 0,
+              connectedSessions: h?.connectedSessions ?? 0,
+              sessionSummary: h?.sessionSummary ?? [],
+            };
+          } catch {
+            return {};
+          }
+        })()),
         hint: gatewayProbe.ready
           ? null
           : gatewayProbe.error ??
