@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 /** Deploy doğrulama — UI/log'da bu ID yoksa Hostinger eski gateway dosyasını çalıştırıyordur. */
-export const GATEWAY_LOADER_ID = "wa-runtime-2026-07-26l";
+export const GATEWAY_LOADER_ID = "wa-runtime-2026-07-26m";
 
 function getConnectedSessionForChannel(channelId) {
   if (!channelId) return null;
