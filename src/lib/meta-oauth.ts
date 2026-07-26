@@ -59,7 +59,12 @@ export function verifyMetaState(state: string): Record<string, unknown> | null {
   try {
     const a = Buffer.from(expected);
     const b = Buffer.from(sig);
-    if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+    if (
+      a.length !== b.length ||
+      !timingSafeEqual(new Uint8Array(a), new Uint8Array(b))
+    ) {
+      return null;
+    }
   } catch {
     return null;
   }
