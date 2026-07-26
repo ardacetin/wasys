@@ -31,6 +31,9 @@ export default function ChannelsPage() {
     metaWabaId: "",
   });
 
+  const qrChannels = channels.filter((c) => c.type === "WHATSAPP_QR");
+  const canAddQr = qrChannels.length === 0;
+
   async function load() {
     const res = await fetch("/api/channels");
     const data = await res.json();
@@ -83,12 +86,21 @@ export default function ChannelsPage() {
   }
 
   async function addQrChannel() {
+    if (!canAddQr) {
+      alert("Bu hesapta zaten bir WhatsApp QR kanalı var. Şimdilik tek numara bağlanabilir.");
+      return;
+    }
     const res = await fetch("/api/channels", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ type: "WHATSAPP_QR", name: "WhatsApp QR" }),
     });
     const data = await res.json();
+    if (!res.ok) {
+      alert(data.error ?? "QR kanalı eklenemedi");
+      void load();
+      return;
+    }
     if (data.channel) setChannels((prev) => [...prev, data.channel]);
   }
 
@@ -121,7 +133,7 @@ export default function ChannelsPage() {
       <div>
         <h1 className="font-[family-name:var(--font-display)] text-3xl">Kanallar</h1>
         <p className="mt-1 text-sm text-ink-muted">
-          Öncelikli bağlantı: WhatsApp QR. Cloud API ikinci yöntem olarak hazır.
+          Öncelikli bağlantı: WhatsApp QR (hesap başına tek numara). Cloud API ikinci yöntem olarak hazır.
         </p>
       </div>
 
@@ -225,13 +237,19 @@ export default function ChannelsPage() {
         ))}
       </div>
 
-      <div className="flex flex-wrap gap-3">
-        <button
-          onClick={() => void addQrChannel()}
-          className="rounded-xl border border-line bg-white px-4 py-2 text-sm font-semibold hover:bg-brand-soft"
-        >
-          + QR kanalı ekle
-        </button>
+      <div className="flex flex-wrap items-center gap-3">
+        {canAddQr ? (
+          <button
+            onClick={() => void addQrChannel()}
+            className="rounded-xl border border-line bg-white px-4 py-2 text-sm font-semibold hover:bg-brand-soft"
+          >
+            + QR kanalı ekle
+          </button>
+        ) : (
+          <p className="text-sm text-ink-muted">
+            WhatsApp QR limiti: bu hesapta tek numara. Yeni numara için önce mevcut bağlantıyı kesin veya destek ile iletişime geçin.
+          </p>
+        )}
       </div>
 
       <form onSubmit={addCloudChannel} className="rounded-2xl border border-line bg-bg-elevated p-5">
