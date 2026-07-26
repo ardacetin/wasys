@@ -44,6 +44,27 @@ GATEWAY_DATA_DIR=/home/u781807728/wasys-data
 Eski `nodejs/data/prod.db` yolu Redeploy sonrası müşteri verilerini siler.
 Uygulama açılışta eski dosyayı bir kez `wasys-data/` altına taşımaya çalışır.
 
+## WhatsApp Cloud — Facebook ile bağla
+
+Kanallar sayfasında token sormadan Facebook OAuth / Embedded Signup kullanılır.
+
+1. [Meta for Developers](https://developers.facebook.com/) uygulaması oluşturun  
+2. WhatsApp + Facebook Login for Business ekleyin  
+3. **Valid OAuth Redirect URI**: `https://wasys.pro/api/meta/oauth/callback`  
+4. **Allowed domains**: `wasys.pro`  
+5. `.env` / panel:
+
+```env
+META_APP_ID=...
+META_APP_SECRET=...
+META_VERIFY_TOKEN=wasys-verify-token
+# Opsiyonel Embedded Signup:
+META_EMBEDDED_SIGNUP_CONFIG_ID=...
+```
+
+6. Webhook: `https://wasys.pro/api/webhooks/meta` + verify token  
+7. Restart → Kanallar → **Facebook ile WhatsApp bağla**
+
 ## WhatsApp QR bağlantısı sık kopuyorsa
 
 Baileys oturumu **Node süreci ayaktayken** canlı kalır. Kısa sürede düşmenin
