@@ -20,7 +20,10 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { NewMessageNotifier } from "@/components/new-message-notifier";
+import {
+  MessageNotifyEngine,
+  NotificationPermissionControl,
+} from "@/components/new-message-notifier";
 
 type NavLink = { href: string; label: string; icon: LucideIcon };
 
@@ -155,7 +158,9 @@ export function AppShell({
           <div className="mt-0.5 text-xs text-white/50">
             {isPlatformAdmin ? "Süper yönetici" : `${plan} paket`}
           </div>
-          {!isPlatformAdmin ? <NewMessageNotifier enabled /> : null}
+          {!isPlatformAdmin ? (
+            <NotificationPermissionControl enabled />
+          ) : null}
           <button
             onClick={() => signOut({ callbackUrl: "/" })}
             className="mt-3 text-xs text-white/60 hover:text-white"
@@ -184,9 +189,10 @@ export function AppShell({
             </div>
           </div>
           {!isPlatformAdmin ? (
-            <NewMessageNotifier enabled variant="light" />
+            <NotificationPermissionControl enabled variant="light" />
           ) : null}
         </header>
+        {!isPlatformAdmin ? <MessageNotifyEngine enabled /> : null}
         <main className="min-h-0 flex-1">{children}</main>
       </div>
     </div>

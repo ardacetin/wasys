@@ -6,33 +6,149 @@ import {
   canShowBrowserNotification,
   getActiveConversationId,
   getNotificationPermission,
+  playMessageSound,
   requestNotificationPermission,
   showBrowserNotification,
+  unlockNotificationAudio,
   type BrowserNotificationPermission,
 } from "@/lib/browser-notifications";
 import { cn } from "@/lib/utils";
 
-type ConversationSnap = {
+type InboundEvent = {
   id: string;
-  unreadCount: number;
-  lastMessageAt: string;
-  lastMessagePreview: string | null;
-  contact: { name: string | null; phone: string };
+  conversationId: string;
+  body: string | null;
+  type: string;
+  createdAt: string;
+  contactName: string | null;
+  contactPhone: string;
 };
 
-const POLL_MS = 6_000;
+const POLL_MS = 3_500;
 
-function previewText(c: ConversationSnap) {
-  const raw = c.lastMessagePreview?.trim();
-  if (!raw) return "Yeni mesaj";
-  return raw.length > 120 ? `${raw.slice(0, 117)}…` : raw;
+function previewText(m: InboundEvent) {
+  if (m.body?.trim()) {
+    const raw = m.body.trim();
+    return raw.length > 120 ? `${raw.slice(0, 117)}…` : raw;
+  }
+  if (m.type === "AUDIO") return "Sesli mesaj";
+  if (m.type === "IMAGE") return "Görsel";
+  return "Yeni mesaj";
 }
 
-function contactLabel(c: ConversationSnap) {
-  return c.contact.name?.trim() || c.contact.phone;
+function contactLabel(m: InboundEvent) {
+  return m.contactName?.trim() || m.contactPhone;
 }
 
-export function NewMessageNotifier({
+/**
+ * Tek poller — AppShell'de bir kez mount edilir.
+ * İzin UI'sı NotificationPermissionControl ile ayrı yerlerde gösterilir.
+ */
+export function MessageNotifyEngine({ enabled }: { enabled: boolean }) {
+  const cursorRef = useRef<string | null>(null);
+  const seenIdsRef = useRef<Set<string>>(new Set());
+  const primedRef = useRef(false);
+  const [permission, setPermission] = useState<BrowserNotificationPermission>("default");
+
+  useEffect(() => {
+    setPermission(getNotificationPermission());
+    const id = window.setInterval(() => {
+      setPermission(getNotificationPermission());
+    }, 15_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const poll = useCallback(async () => {
+    if (!enabled) return;
+    if (getNotificationPermission() !== "granted") return;
+
+    try {
+      const qs = cursorRef.current
+        ? `?since=${encodeURIComponent(cursorRef.current)}`
+        : "";
+      const res = await fetch(`/api/inbox/events${qs}`, { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+      const serverTime = String(data.serverTime ?? new Date().toISOString());
+      const list = (data.messages ?? []) as InboundEvent[];
+
+      if (!primedRef.current) {
+        primedRef.current = true;
+        cursorRef.current = serverTime;
+        for (const m of list) seenIdsRef.current.add(m.id);
+        return;
+      }
+
+      const activeId = getActiveConversationId();
+      const tabHidden = document.visibilityState === "hidden";
+
+      for (const m of list) {
+        if (seenIdsRef.current.has(m.id)) continue;
+        seenIdsRef.current.add(m.id);
+
+        playMessageSound();
+
+        const viewingThis =
+          Boolean(activeId) && activeId === m.conversationId && !tabHidden;
+
+        if (!viewingThis && canShowBrowserNotification()) {
+          showBrowserNotification({
+            title: `WASYS · ${contactLabel(m)}`,
+            body: previewText(m),
+            tag: `wasys-msg-${m.id}`,
+            conversationId: m.conversationId,
+          });
+        }
+      }
+
+      if (list.length === 0) {
+        cursorRef.current = serverTime;
+      } else {
+        cursorRef.current = list[list.length - 1]!.createdAt;
+      }
+
+      if (seenIdsRef.current.size > 300) {
+        seenIdsRef.current = new Set([...seenIdsRef.current].slice(-150));
+      }
+    } catch {
+      /* sessiz */
+    }
+  }, [enabled]);
+
+  useEffect(() => {
+    if (!enabled || permission !== "granted") return;
+    void poll();
+    const t = setInterval(() => void poll(), POLL_MS);
+    return () => clearInterval(t);
+  }, [enabled, permission, poll]);
+
+  useEffect(() => {
+    if (!enabled || permission !== "granted") return;
+    const onVis = () => {
+      if (document.visibilityState === "visible") void poll();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [enabled, permission, poll]);
+
+  // İzin yeni verildiğinde diğer tab/control tetikleyebilir
+  useEffect(() => {
+    if (!enabled) return;
+    const onGranted = () => {
+      setPermission("granted");
+      primedRef.current = false;
+      cursorRef.current = null;
+      seenIdsRef.current.clear();
+      void poll();
+    };
+    window.addEventListener("wasys-notify-enabled", onGranted);
+    return () => window.removeEventListener("wasys-notify-enabled", onGranted);
+  }, [enabled, poll]);
+
+  return null;
+}
+
+export function NotificationPermissionControl({
   enabled,
   variant = "sidebar",
 }: {
@@ -40,84 +156,24 @@ export function NewMessageNotifier({
   variant?: "sidebar" | "light";
 }) {
   const [permission, setPermission] = useState<BrowserNotificationPermission>("default");
-  const seenRef = useRef<Map<string, { unread: number; at: string }> | null>(null);
-  const primedRef = useRef(false);
   const dark = variant === "sidebar";
 
   useEffect(() => {
     setPermission(getNotificationPermission());
   }, []);
 
-  const poll = useCallback(async () => {
-    if (!enabled || !canShowBrowserNotification()) return;
-
-    try {
-      const res = await fetch("/api/conversations", { cache: "no-store" });
-      if (!res.ok) return;
-      const data = await res.json();
-      const list = (data.conversations ?? []) as ConversationSnap[];
-
-      const next = new Map<string, { unread: number; at: string }>();
-      for (const c of list) {
-        next.set(c.id, { unread: c.unreadCount, at: c.lastMessageAt });
-      }
-
-      if (!primedRef.current || !seenRef.current) {
-        seenRef.current = next;
-        primedRef.current = true;
-        return;
-      }
-
-      const prev = seenRef.current;
-      const activeId = getActiveConversationId();
-      const tabVisible = document.visibilityState === "visible";
-
-      for (const c of list) {
-        const before = prev.get(c.id);
-        const unreadGrew = !before
-          ? c.unreadCount > 0
-          : c.unreadCount > before.unread;
-        const newerInbound =
-          Boolean(before) &&
-          c.lastMessageAt !== before!.at &&
-          c.unreadCount > 0;
-
-        if (!unreadGrew && !newerInbound) continue;
-        if (tabVisible && activeId && activeId === c.id) continue;
-
-        showBrowserNotification({
-          title: `WASYS · ${contactLabel(c)}`,
-          body: previewText(c),
-          tag: `wasys-conv-${c.id}`,
-          conversationId: c.id,
-        });
-      }
-
-      seenRef.current = next;
-    } catch {
-      /* ağ hatası — sessiz */
-    }
-  }, [enabled]);
-
-  useEffect(() => {
-    if (!enabled) return;
-    if (permission !== "granted") return;
-    void poll();
-    const t = setInterval(() => void poll(), POLL_MS);
-    return () => clearInterval(t);
-  }, [enabled, poll, permission]);
-
   async function enable() {
     const result = await requestNotificationPermission();
     setPermission(result);
+    await unlockNotificationAudio();
     if (result === "granted") {
+      playMessageSound();
       showBrowserNotification({
         title: "WASYS bildirimleri açık",
-        body: "Yeni WhatsApp mesajlarında tarayıcı bildirimi alacaksınız.",
+        body: "Yeni mesajlarda ses ve tarayıcı bildirimi alacaksınız.",
         tag: "wasys-notify-on",
       });
-      primedRef.current = false;
-      void poll();
+      window.dispatchEvent(new Event("wasys-notify-enabled"));
     }
   }
 
@@ -133,7 +189,7 @@ export function NewMessageNotifier({
         )}
       >
         <BellRing size={14} className="shrink-0 text-brand" />
-        <span>Yeni mesaj bildirimleri açık</span>
+        <span>Bildirim + ses açık</span>
       </div>
     );
   }
@@ -174,9 +230,17 @@ export function NewMessageNotifier({
             dark ? "text-white/45" : "text-ink-muted",
           )}
         >
-          Yeni mesaj gelince tarayıcı uyarısı
+          Yeni mesajda ses + tarayıcı uyarısı
         </span>
       </span>
     </button>
   );
+}
+
+/** Geriye dönük isim — yalnızca izin UI (poll yok). */
+export function NewMessageNotifier(props: {
+  enabled: boolean;
+  variant?: "sidebar" | "light";
+}) {
+  return <NotificationPermissionControl {...props} />;
 }
