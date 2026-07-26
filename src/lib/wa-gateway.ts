@@ -71,15 +71,28 @@ async function ensureWebhookBridge() {
 async function loadGatewayModule(): Promise<GatewayModule> {
   const { pathToFileURL } = await import("node:url");
   const { join } = await import("node:path");
-  const { existsSync } = await import("node:fs");
+  const { existsSync, statSync } = await import("node:fs");
   const { createRequire } = await import("node:module");
 
   // Next instrumentation yolu: server.js atlandıysa da Baileys'i kurtar.
   try {
     const require = createRequire(join(process.cwd(), "package.json"));
-    require("./scripts/ensure-baileys.cjs").ensureBaileysInstalled();
+    const ensurePath = join(process.cwd(), "scripts/ensure-baileys.cjs");
+    if (existsSync(ensurePath)) {
+      require(ensurePath).ensureBaileysInstalled();
+    }
   } catch (error) {
     console.warn("[WASYS] ensure-baileys atlandı", error);
+  }
+
+  const baileysEntry = join(
+    process.cwd(),
+    "node_modules/@whiskeysockets/baileys/lib/index.js",
+  );
+  if (!existsSync(baileysEntry)) {
+    throw new Error(
+      `Baileys kurulu değil: ${baileysEntry}. SSH: npm install @whiskeysockets/baileys@6.7.22 --omit=dev --legacy-peer-deps`,
+    );
   }
 
   const gatewayPath = join(process.cwd(), "gateway", "server.mjs");
@@ -87,7 +100,9 @@ async function loadGatewayModule(): Promise<GatewayModule> {
     throw new Error(`gateway/server.mjs bulunamadı: ${gatewayPath}`);
   }
 
-  return runtimeImport(pathToFileURL(gatewayPath).href);
+  // mtime ile cache bust — Hostinger'da eski gateway/server.mjs ESM cache'de kalmasın.
+  const bust = statSync(gatewayPath).mtimeMs;
+  return runtimeImport(`${pathToFileURL(gatewayPath).href}?t=${bust}`);
 }
 
 /**

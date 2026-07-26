@@ -1,48 +1,55 @@
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
-import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import qrcode from "qrcode";
 import pino from "pino";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const PROJECT_ROOT = path.resolve(__dirname, "..");
-const requireFromRoot = createRequire(path.join(PROJECT_ROOT, "package.json"));
+
+function resolveProjectRoot() {
+  const roots = [
+    path.resolve(__dirname, ".."),
+    process.cwd(),
+    path.resolve(process.cwd(), ".."),
+  ];
+  for (const root of roots) {
+    const marker = path.join(
+      root,
+      "node_modules/@whiskeysockets/baileys/lib/index.js",
+    );
+    if (fs.existsSync(marker)) return root;
+  }
+  return path.resolve(__dirname, "..");
+}
+
+const PROJECT_ROOT = resolveProjectRoot();
 
 /**
- * Hostinger'da bare `@whiskeysockets/baileys` bazen çözülmez (eksik/budanmış
- * node_modules). Mutlak dosya yolundan yükle.
- * @returns {Promise<typeof import("@whiskeysockets/baileys")>}
+ * Hostinger'da bare `@whiskeysockets/baileys` import'u sık bozuluyor.
+ * Paket adını HİÇ kullanma — yalnızca mutlak lib/index.js yolundan yükle.
  */
 async function loadBaileys() {
-  const candidates = [
-    path.join(PROJECT_ROOT, "node_modules/@whiskeysockets/baileys/lib/index.js"),
-    path.join(PROJECT_ROOT, "node_modules/@whiskeysockets/baileys/lib/index.mjs"),
-  ];
+  const entry = path.join(
+    PROJECT_ROOT,
+    "node_modules/@whiskeysockets/baileys/lib/index.js",
+  );
 
-  for (const file of candidates) {
-    if (fs.existsSync(file)) {
-      return import(pathToFileURL(file).href);
-    }
+  if (!fs.existsSync(entry)) {
+    throw new Error(
+      `Baileys dosyası yok: ${entry}. ` +
+        `SSH: cd ~/domains/wasys.pro/nodejs && npm install @whiskeysockets/baileys@6.7.22 --omit=dev --legacy-peer-deps && panelden Restart. ` +
+        `cwd=${process.cwd()} root=${PROJECT_ROOT}`,
+    );
   }
 
   try {
-    const resolved = requireFromRoot.resolve("@whiskeysockets/baileys");
-    return import(pathToFileURL(resolved).href);
-  } catch {
-    // fall through
-  }
-
-  try {
-    return await import("@whiskeysockets/baileys");
+    return await import(pathToFileURL(entry).href);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new Error(
-      `Baileys bulunamadı (${path.join(PROJECT_ROOT, "node_modules/@whiskeysockets/baileys")}). ` +
-        `SSH: npm install @whiskeysockets/baileys@6.7.22 --omit=dev --legacy-peer-deps && panelden Redeploy. ` +
-        `Detay: ${detail}`,
+      `Baileys dosyası var ama yüklenemedi (${entry}). Detay: ${detail}`,
     );
   }
 }
