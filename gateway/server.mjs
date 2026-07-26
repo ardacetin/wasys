@@ -1,19 +1,62 @@
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
-import {
-  makeWASocket,
-  useMultiFileAuthState,
-  fetchLatestBaileysVersion,
-  DisconnectReason,
-  downloadMediaMessage,
-} from "@whiskeysockets/baileys";
+import { createRequire } from "node:module";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import qrcode from "qrcode";
 import pino from "pino";
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const PROJECT_ROOT = path.resolve(__dirname, "..");
+const requireFromRoot = createRequire(path.join(PROJECT_ROOT, "package.json"));
+
+/**
+ * Hostinger'da bare `@whiskeysockets/baileys` bazen çözülmez (eksik/budanmış
+ * node_modules). Mutlak dosya yolundan yükle.
+ * @returns {Promise<typeof import("@whiskeysockets/baileys")>}
+ */
+async function loadBaileys() {
+  const candidates = [
+    path.join(PROJECT_ROOT, "node_modules/@whiskeysockets/baileys/lib/index.js"),
+    path.join(PROJECT_ROOT, "node_modules/@whiskeysockets/baileys/lib/index.mjs"),
+  ];
+
+  for (const file of candidates) {
+    if (fs.existsSync(file)) {
+      return import(pathToFileURL(file).href);
+    }
+  }
+
+  try {
+    const resolved = requireFromRoot.resolve("@whiskeysockets/baileys");
+    return import(pathToFileURL(resolved).href);
+  } catch {
+    // fall through
+  }
+
+  try {
+    return await import("@whiskeysockets/baileys");
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Baileys bulunamadı (${path.join(PROJECT_ROOT, "node_modules/@whiskeysockets/baileys")}). ` +
+        `SSH: npm install @whiskeysockets/baileys@6.7.22 --omit=dev --legacy-peer-deps && panelden Redeploy. ` +
+        `Detay: ${detail}`,
+    );
+  }
+}
+
+/** @type {Awaited<ReturnType<typeof loadBaileys>> | null} */
+let baileys = null;
+
+async function getBaileys() {
+  if (!baileys) baileys = await loadBaileys();
+  return baileys;
+}
+
 const PORT = Number(process.env.GATEWAY_PORT ?? 4001);
 const SECRET = process.env.GATEWAY_SECRET ?? "wasys-gateway-secret";
-// Persistent dir (survives redeploys) — same place as the SQLite DB.
 const DATA_ROOT = process.env.GATEWAY_DATA_DIR ?? path.join(process.cwd(), "data");
 const AUTH_ROOT = path.join(DATA_ROOT, "gateway-auth");
 const REGISTRY_FILE = path.join(DATA_ROOT, "gateway-sessions.json");
@@ -28,7 +71,7 @@ const logger = pino({ level: "info" });
  * @property {string=} qrDataUrl
  * @property {string=} phoneNumber
  * @property {string=} lastError
- * @property {import("@whiskeysockets/baileys").WASocket=} sock
+ * @property {any=} sock
  */
 
 /** @type {Map<string, SessionState>} */
@@ -59,7 +102,6 @@ function resumeSessions() {
     for (const entry of entries) {
       if (!entry?.sessionId || sessions.has(entry.sessionId)) continue;
       const authDir = path.join(AUTH_ROOT, entry.sessionId);
-      // Only resume sessions that were actually paired before.
       if (!fs.existsSync(path.join(authDir, "creds.json"))) continue;
       const session = {
         channelId: entry.channelId,
@@ -109,9 +151,6 @@ async function notifyWebhook(session, event, payload) {
     ...payload,
   };
 
-  // In-process fast path: when Next.js runs in the same process (server.js on
-  // Hostinger), the webhook handler registers itself on globalThis so we can
-  // skip HTTP entirely (loopback ports may be blocked on shared hosting).
   const inProcessHandler = globalThis.__wasysGatewayWebhook;
   if (typeof inProcessHandler === "function") {
     try {
@@ -147,6 +186,14 @@ function jidToPhone(jid) {
 }
 
 async function startSocket(session) {
+  const {
+    makeWASocket,
+    useMultiFileAuthState,
+    fetchLatestBaileysVersion,
+    DisconnectReason,
+    downloadMediaMessage,
+  } = await getBaileys();
+
   ensureAuthDir();
   const authDir = path.join(AUTH_ROOT, session.sessionId);
   const { state, saveCreds } = await useMultiFileAuthState(authDir);
@@ -154,7 +201,6 @@ async function startSocket(session) {
   session.status = "CONNECTING";
   session.lastError = undefined;
 
-  // WhatsApp rejects outdated protocol versions with a 405 — always fetch latest.
   let waVersion;
   try {
     const { version } = await fetchLatestBaileysVersion();
@@ -213,7 +259,6 @@ async function startSocket(session) {
       });
 
       if (loggedOut) {
-        // Phone unlinked this device — wipe creds so a new QR can be issued.
         try {
           fs.rmSync(authDir, { recursive: true, force: true });
         } catch {}
@@ -230,77 +275,74 @@ async function startSocket(session) {
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
     if (type !== "notify") return;
     for (const msg of messages) {
-      await handleIncoming(session, msg);
+      await handleIncoming(session, msg, downloadMediaMessage);
     }
   });
 
   sock.ev.on("messages.update", async (updates) => {
     for (const u of updates) {
-      const status = u.update.status;
-      if (!u.key?.id || status == null) continue;
-      const mapped =
-        status === 4 ? "READ" : status === 3 ? "DELIVERED" : status === 2 ? "SENT" : null;
-      if (!mapped) continue;
+      if (!u.key?.id || !u.update?.status) continue;
+      const statusMap = {
+        2: "SENT",
+        3: "DELIVERED",
+        4: "READ",
+      };
+      const status = statusMap[u.update.status];
+      if (!status) continue;
       await notifyWebhook(session, "message_status", {
         externalId: u.key.id,
-        status: mapped,
+        status,
       });
     }
   });
 }
 
-async function handleIncoming(session, msg) {
+async function handleIncoming(session, msg, downloadMediaMessage) {
   if (msg.key.fromMe) return;
-  const remoteJid = msg.key.remoteJid;
-  if (!remoteJid || remoteJid.endsWith("@g.us") || remoteJid === "status@broadcast") return;
+  const remote = msg.key.remoteJid;
+  if (!remote || remote.endsWith("@g.us") || remote === "status@broadcast") return;
 
-  const phone = jidToPhone(remoteJid);
-  const pushName = msg.pushName ?? undefined;
-  const externalId = msg.key.id ?? undefined;
-
+  const from = jidToPhone(remote);
+  const pushName = msg.pushName ?? null;
   let type = "TEXT";
-  let body;
-  let mediaUrl;
-  let mediaMimeType;
+  let body =
+    msg.message?.conversation ??
+    msg.message?.extendedTextMessage?.text ??
+    msg.message?.imageMessage?.caption ??
+    msg.message?.videoMessage?.caption ??
+    null;
+  let mediaUrl = null;
+  let mediaMimeType = null;
 
-  if (msg.message?.conversation) {
-    body = msg.message.conversation;
-  } else if (msg.message?.extendedTextMessage?.text) {
-    body = msg.message.extendedTextMessage.text;
-  } else if (msg.message?.audioMessage) {
-    type = "AUDIO";
-    mediaMimeType = msg.message.audioMessage.mimetype ?? "audio/ogg";
-    body = "[Sesli mesaj]";
-    try {
+  try {
+    if (msg.message?.audioMessage) {
+      type = "AUDIO";
       const buffer = await downloadMediaMessage(msg, "buffer", {});
-      const mediaDir = path.join(process.cwd(), "public", "uploads", "audio");
-      fs.mkdirSync(mediaDir, { recursive: true });
-      const filename = `${externalId ?? Date.now()}.ogg`;
-      fs.writeFileSync(path.join(mediaDir, filename), buffer);
-      mediaUrl = `/uploads/audio/${filename}`;
-    } catch (err) {
-      logger.warn({ err }, "audio download failed");
+      const fileName = `wa_${session.sessionId}_${Date.now()}.ogg`;
+      const publicDir = path.join(process.cwd(), "public", "uploads");
+      fs.mkdirSync(publicDir, { recursive: true });
+      const filePath = path.join(publicDir, fileName);
+      fs.writeFileSync(filePath, buffer);
+      mediaUrl = `/uploads/${fileName}`;
+      mediaMimeType = msg.message.audioMessage.mimetype ?? "audio/ogg";
+      body = body ?? "";
+    } else if (msg.message?.imageMessage) {
+      type = "IMAGE";
+    } else if (msg.message?.documentMessage) {
+      type = "DOCUMENT";
     }
-  } else if (msg.message?.imageMessage) {
-    type = "IMAGE";
-    body = msg.message.imageMessage.caption ?? "[Görsel]";
-    mediaMimeType = msg.message.imageMessage.mimetype ?? "image/jpeg";
-  } else if (msg.message?.documentMessage) {
-    type = "DOCUMENT";
-    body = msg.message.documentMessage.fileName ?? "[Dosya]";
-    mediaMimeType = msg.message.documentMessage.mimetype ?? undefined;
-  } else {
-    body = "[Desteklenmeyen mesaj]";
+  } catch (err) {
+    logger.warn({ err }, "media download failed");
   }
 
   await notifyWebhook(session, "message", {
-    from: phone,
+    from,
     pushName,
-    externalId,
     type,
     body,
     mediaUrl,
     mediaMimeType,
+    externalId: msg.key.id,
   });
 }
 
@@ -332,21 +374,26 @@ async function sendAudio(sessionId, to, audioUrl, ptt = true) {
   return { externalId: result?.key?.id };
 }
 
-/**
- * In-process API. When Next.js runs in the same Node process (server.js on
- * Hostinger single-process hosting), src/lib/wa-gateway.ts calls these
- * functions directly via globalThis.__wasysGateway — no loopback HTTP needed.
- * The HTTP server below is just a thin wrapper around the same operations.
- */
 export const gatewayOps = {
   health() {
-    return { ok: true, sessions: sessions.size };
+    const baileysDir = path.join(
+      PROJECT_ROOT,
+      "node_modules/@whiskeysockets/baileys",
+    );
+    return {
+      ok: true,
+      sessions: sessions.size,
+      baileysPath: baileysDir,
+      baileysPresent: fs.existsSync(path.join(baileysDir, "package.json")),
+    };
   },
 
   async startSession({ channelId, sessionId, webhookUrl }) {
     if (!channelId || !sessionId || !webhookUrl) {
       throw new Error("channelId, sessionId, webhookUrl required");
     }
+
+    await getBaileys();
 
     let session = sessions.get(sessionId);
     if (!session) {
@@ -358,7 +405,6 @@ export const gatewayOps = {
     }
     saveRegistry();
 
-    // Already connected? Don't restart the socket.
     if (session.status !== "CONNECTED" || !session.sock) {
       void startSocket(session);
     }
@@ -457,12 +503,17 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-export function startGateway() {
+export async function startGateway() {
   ensureAuthDir();
 
-  // Register the in-process API before anything else: even if the HTTP port
-  // can't be opened (shared hosts may block extra ports), Next API routes in
-  // this process can still drive the gateway directly.
+  try {
+    await getBaileys();
+    logger.info("Baileys module loaded from project node_modules");
+  } catch (error) {
+    logger.error({ err: error }, "Baileys load failed at gateway start");
+    throw error;
+  }
+
   globalThis.__wasysGateway = gatewayOps;
 
   return new Promise((resolve) => {
@@ -492,7 +543,6 @@ export function startGateway() {
   });
 }
 
-// Standalone: `node gateway/server.mjs`
 if (process.argv[1] && process.argv[1].endsWith("server.mjs")) {
   void startGateway();
 }

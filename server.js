@@ -89,12 +89,67 @@ try {
   console.error("[WASYS] persistent path setup failed", error);
 }
 
-// WhatsApp QR (Baileys) — Hostinger bazen node_modules'ten düşürür; gateway
-// import edilmeden önce zorunlu bağımlılığı doğrula / kur.
+// WhatsApp QR (Baileys) — Hostinger bazen node_modules'ten düşürür.
+// scripts/ensure-baileys.cjs yoksa (eski deploy) burada inline dene.
+function ensureBaileysInline() {
+  const marker = resolve(
+    projectRoot,
+    "node_modules/@whiskeysockets/baileys/package.json",
+  );
+  if (existsSync(marker)) {
+    console.log("[WASYS] Baileys hazır");
+    return true;
+  }
+  console.warn("[WASYS] Baileys eksik — npm install deneniyor…");
+  const npmCliCandidates = [
+    resolve(nodeDir, "npm"),
+    resolve(nodeDir, "../lib/node_modules/npm/bin/npm-cli.js"),
+    "/opt/alt/alt-nodejs22/root/usr/lib/node_modules/npm/bin/npm-cli.js",
+  ];
+  let command = "npm";
+  let args = [
+    "install",
+    "@whiskeysockets/baileys@6.7.22",
+    "--omit=dev",
+    "--legacy-peer-deps",
+    "--no-audit",
+    "--no-fund",
+  ];
+  for (const candidate of npmCliCandidates) {
+    if (!existsSync(candidate)) continue;
+    if (candidate.endsWith("npm-cli.js")) {
+      command = process.execPath;
+      args = [candidate, ...args];
+    } else {
+      command = candidate;
+    }
+    break;
+  }
+  const result = spawnSync(command, args, {
+    cwd: projectRoot,
+    env: process.env,
+    stdio: "inherit",
+  });
+  if (existsSync(marker)) {
+    console.log("[WASYS] Baileys kuruldu");
+    return true;
+  }
+  console.error(
+    "[WASYS] Baileys kurulamadı",
+    result.error?.message ?? `exit ${result.status}`,
+  );
+  return false;
+}
+
 try {
-  require("./scripts/ensure-baileys.cjs").ensureBaileysInstalled();
+  if (existsSync(resolve(projectRoot, "scripts/ensure-baileys.cjs"))) {
+    require("./scripts/ensure-baileys.cjs").ensureBaileysInstalled();
+  } else {
+    ensureBaileysInline();
+  }
 } catch (error) {
   console.error("[WASYS] Baileys doğrulama hatası", error);
+  ensureBaileysInline();
 }
 
 function prismaCli() {
