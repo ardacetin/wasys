@@ -297,17 +297,31 @@ async function bootstrapPlatformAdminInProcess(): Promise<void> {
   );
 }
 
+async function sqliteColumnExists(
+  table: string,
+  column: string,
+): Promise<boolean> {
+  const rows = await prisma.$queryRawUnsafe<Array<{ name: string }>>(
+    `PRAGMA table_info("${table.replace(/"/g, "")}")`,
+  );
+  return (
+    Array.isArray(rows) &&
+    rows.some((row) => String(row.name).toLowerCase() === column.toLowerCase())
+  );
+}
+
 async function ensureContactWaJidColumn() {
   try {
-    await prisma.$executeRawUnsafe(
-      `ALTER TABLE "Contact" ADD COLUMN "waJid" TEXT`,
-    );
-    console.log("[WASYS DB] Contact.waJid column added");
+    if (!(await sqliteColumnExists("Contact", "waJid"))) {
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE "Contact" ADD COLUMN "waJid" TEXT`,
+      );
+      console.log("[WASYS DB] Contact.waJid column added");
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    // duplicate column = already migrated
-    if (!/duplicate column|already exists/i.test(message)) {
-      // ignore — table may not exist yet (init.sql path handles it)
+    if (!/duplicate column|already exists|no such table/i.test(message)) {
+      console.warn("[WASYS DB] Contact.waJid migration skipped:", message);
     }
   }
 }

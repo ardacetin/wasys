@@ -1179,6 +1179,10 @@ const server = http.createServer(async (req, res) => {
 export async function startGateway() {
   ensureAuthDir();
 
+  if (globalThis.__wasysGatewayListenStarted) {
+    return Boolean(globalThis.__wasysGatewayHttpListening);
+  }
+
   // İkinci import boş sessions Map ile global'i ezmesin (gönderim kırılıyor,
   // gelen webhook eski sokette kalıyor).
   if (
@@ -1193,8 +1197,10 @@ export async function startGateway() {
       },
       "gateway already bound — keeping existing ops (skip overwrite)",
     );
-    return false;
+    return Boolean(globalThis.__wasysGatewayHttpListening);
   }
+
+  globalThis.__wasysGatewayListenStarted = true;
 
   // Ops'u hemen kaydet — site boot'u Baileys yüklemesini beklememeli.
   // İlk QR / session start getBaileys() ile lazy yükler.
@@ -1248,6 +1254,7 @@ export async function startGateway() {
       settle(false);
     });
     server.listen(PORT, "127.0.0.1", () => {
+      globalThis.__wasysGatewayHttpListening = true;
       logger.info(`WASYS WhatsApp gateway listening on 127.0.0.1:${PORT}`);
       settle(true);
     });
