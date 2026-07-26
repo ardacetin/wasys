@@ -152,15 +152,7 @@ try {
   ensureBaileysInline();
 }
 
-// Vendor kopyası: gateway/wa-runtime.mjs node_modules'e ihtiyaç duymadan yüklenebilsin.
-try {
-  const ensure = require("./scripts/ensure-baileys.cjs");
-  if (typeof ensure.syncVendorCopy === "function") {
-    ensure.syncVendorCopy();
-  }
-} catch {
-  /* ensure script yoksa sessiz geç */
-}
+// Vendor kopyası ensureBaileysInstalled içinde (bütünlük OK ise) yapılır.
 
 function prismaCli() {
   const cli = resolve(projectRoot, "node_modules/prisma/build/index.js");

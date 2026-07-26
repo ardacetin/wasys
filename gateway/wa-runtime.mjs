@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 /** Deploy doğrulama — UI/log'da bu ID yoksa Hostinger eski gateway dosyasını çalıştırıyordur. */
-export const GATEWAY_LOADER_ID = "wa-runtime-2026-07-26j";
+export const GATEWAY_LOADER_ID = "wa-runtime-2026-07-26k";
 
 function getConnectedSessionForChannel(channelId) {
   if (!channelId) return null;
@@ -82,6 +82,15 @@ const pino = requireDependency("pino", "pino/pino.js");
  * gateway/server.mjs kalabiliyor. Paket adını HİÇ kullanma — yalnızca file:// .
  */
 async function loadBaileys() {
+  try {
+    const ensurePath = path.join(PROJECT_ROOT, "scripts/ensure-baileys.cjs");
+    if (fs.existsSync(ensurePath)) {
+      requireFromRoot(ensurePath).ensureBaileysInstalled();
+    }
+  } catch (error) {
+    console.warn("[WASYS] ensure-baileys before import failed", error);
+  }
+
   // Önce node_modules — bağımlılıklar (protobufjs) orada hoist edilir.
   // vendor yolu yedek (paket budanmışsa).
   const candidates = [
@@ -228,7 +237,7 @@ function resumeSessions() {
       };
       sessions.set(entry.sessionId, session);
       logger.info({ sessionId: entry.sessionId }, "resuming WhatsApp session");
-      void startSocket(session);
+      runStartSocket(session);
     }
   } catch (err) {
     logger.warn({ err }, "failed to resume sessions");
@@ -625,6 +634,15 @@ function endSocketQuietly(sock) {
   }
 }
 
+function runStartSocket(session) {
+  void startSocket(session).catch((err) => {
+    logger.error({ err, sessionId: session.sessionId }, "startSocket failed");
+    session.status = "ERROR";
+    session.lastError =
+      err instanceof Error ? err.message : "WhatsApp oturumu başlatılamadı";
+  });
+}
+
 async function startSocket(session) {
   const {
     makeWASocket,
@@ -786,7 +804,7 @@ async function startSocket(session) {
 
       clearReconnectTimer(session);
       session.reconnectTimer = setTimeout(() => {
-        void startSocket(session);
+        runStartSocket(session);
       }, delay);
     }
   });
@@ -1069,7 +1087,7 @@ export const gatewayOps = {
     saveRegistry();
 
     if (session.status !== "CONNECTED" || !session.sock) {
-      void startSocket(session);
+      runStartSocket(session);
     }
     return {
       ok: true,

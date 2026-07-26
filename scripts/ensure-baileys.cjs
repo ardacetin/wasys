@@ -12,8 +12,11 @@ const {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
+  closeSync,
   readdirSync,
   rmSync,
+  statSync,
   writeFileSync,
 } = require("node:fs");
 const { tmpdir } = require("node:os");
@@ -34,12 +37,19 @@ const BAILEYS_RUNTIME_SPECS = [
 const BAILEYS_RUNTIME_MARKERS = [
   "protobufjs/package.json",
   "ws/package.json",
+  "ws/wrapper.mjs",
   "@hapi/boom/package.json",
   "async-mutex/package.json",
   "axios/package.json",
   "music-metadata/package.json",
   "@cacheable/node-cache/package.json",
   "libsignal/package.json",
+];
+/** Baileys paketi yarım kaldığında (Hostinger eşzamanlı kopya) import patlar. */
+const BAILEYS_INTEGRITY_MARKERS = [
+  "@whiskeysockets/baileys/lib/index.js",
+  "@whiskeysockets/baileys/WAProto/index.js",
+  "ws/wrapper.mjs",
 ];
 const projectRoot = resolve(__dirname, "..");
 const nmRoot = resolve(projectRoot, "node_modules");
@@ -76,6 +86,158 @@ function resolveNpm() {
     }
   }
   return { command: "npm", prefixArgs: [] };
+}
+
+function resolveDataRoot() {
+  try {
+    return require("../prisma/persistent-paths.cjs").resolveDataRoot();
+  } catch {
+    return resolve(projectRoot, "data");
+  }
+}
+
+const installLockFile = join(resolveDataRoot(), ".ensure-baileys.lock");
+const persistentNmRoot = join(resolveDataRoot(), "baileys-node_modules");
+
+function sleepMs(ms) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    /* busy-wait — boot path, no async */
+  }
+}
+
+/** Hostinger aynı anda birden fazla worker boot edince node_modules bozuluyor. */
+function withInstallLock(fn) {
+  const staleMs = 15 * 60 * 1000;
+  const maxWaitMs = 180 * 1000;
+  const started = Date.now();
+
+  while (Date.now() - started < maxWaitMs) {
+    try {
+      if (existsSync(installLockFile)) {
+        try {
+          const age = Date.now() - statSync(installLockFile).mtimeMs;
+          if (age > staleMs) {
+            rmSync(installLockFile, { force: true });
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+      mkdirSync(dirname(installLockFile), { recursive: true });
+      const fd = openSync(installLockFile, "wx");
+      writeFileSync(fd, String(process.pid));
+      closeSync(fd);
+      try {
+        return fn();
+      } finally {
+        try {
+          rmSync(installLockFile, { force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    } catch (error) {
+      if (error && error.code === "EEXIST") {
+        sleepMs(800);
+        continue;
+      }
+      throw error;
+    }
+  }
+  console.warn("[WASYS] Baileys kurulum kilidi zaman aşımı — kilitsiz devam");
+  return fn();
+}
+
+function missingIntegrityMarkers() {
+  return BAILEYS_INTEGRITY_MARKERS.filter(
+    (rel) => !existsSync(resolve(nmRoot, rel)),
+  );
+}
+
+function isBaileysComplete() {
+  return missingIntegrityMarkers().length === 0;
+}
+
+function copyPackageTree(fromRoot, toRoot, entry) {
+  const from = resolve(fromRoot, entry);
+  if (!existsSync(from)) return;
+  if (entry.startsWith("@")) {
+    const scopeTo = resolve(toRoot, entry);
+    mkdirSync(scopeTo, { recursive: true });
+    for (const scoped of readdirSync(from)) {
+      const sFrom = resolve(from, scoped);
+      const sTo = resolve(scopeTo, scoped);
+      rmSync(sTo, { recursive: true, force: true });
+      cpSync(sFrom, sTo, { recursive: true, force: true });
+    }
+    return;
+  }
+  const to = resolve(toRoot, entry);
+  rmSync(to, { recursive: true, force: true });
+  cpSync(from, to, { recursive: true, force: true });
+}
+
+function restorePersistentNodeModules() {
+  if (!existsSync(resolve(persistentNmRoot, "@whiskeysockets/baileys/WAProto/index.js"))) {
+    return false;
+  }
+  mkdirSync(nmRoot, { recursive: true });
+  const entries = readdirSync(persistentNmRoot).filter(
+    (e) => e !== ".bin" && !e.startsWith("."),
+  );
+  for (const entry of entries) {
+    copyPackageTree(persistentNmRoot, nmRoot, entry);
+  }
+  console.log(`[WASYS] Baileys paketleri kalıcı dizinden geri yüklendi → ${persistentNmRoot}`);
+  return isBaileysComplete();
+}
+
+function backupPersistentNodeModules() {
+  if (!isBaileysComplete()) return;
+  mkdirSync(persistentNmRoot, { recursive: true });
+  const entries = new Set([
+    ...readdirSync(nmRoot).filter((e) => !e.startsWith(".")),
+  ]);
+  for (const entry of entries) {
+    if (entry === ".bin") continue;
+    // Yalnızca Baileys ile ilgili üst seviye paketler + scope
+    if (
+      entry === "@whiskeysockets" ||
+      entry.startsWith("@hapi") ||
+      entry.startsWith("@cacheable") ||
+      [
+        "ws",
+        "protobufjs",
+        "async-mutex",
+        "axios",
+        "music-metadata",
+        "libsignal",
+        "qrcode",
+        "pino",
+      ].includes(entry)
+    ) {
+      copyPackageTree(nmRoot, persistentNmRoot, entry);
+    }
+  }
+}
+
+function purgeBrokenBaileys() {
+  const missing = missingIntegrityMarkers();
+  if (!missing.length) return;
+  console.warn(
+    `[WASYS] Baileys bütünlük hatası (yarım kurulum): ${missing.join(", ")} — yeniden kurulacak`,
+  );
+  try {
+    rmSync(nmPackage, { recursive: true, force: true });
+  } catch {
+    /* ignore */
+  }
+  try {
+    rmSync(vendorDir, { recursive: true, force: true });
+  } catch {
+    /* ignore */
+  }
 }
 
 function isInstalled() {
@@ -147,6 +309,10 @@ function cleanNpmRenameLeftovers() {
 }
 
 function syncVendorCopy() {
+  if (!isBaileysComplete()) {
+    console.warn("[WASYS] Baileys vendor kopyası atlandı — paket eksik/bozuk");
+    return false;
+  }
   if (!isInstalled()) return false;
   try {
     mkdirSync(resolve(projectRoot, "gateway/vendor"), { recursive: true });
@@ -269,41 +435,53 @@ function ensureGatewayDeps() {
 }
 
 function ensureBaileysInstalled() {
-  ensureGatewayDeps();
+  return withInstallLock(() => {
+    ensureGatewayDeps();
 
-  if (!isInstalled()) {
-    console.warn(
-      `[WASYS] ${BAILEYS_SPEC} eksik — izole kurulum deneniyor (Hostinger node_modules budaması)`,
-    );
-
-    const result = installViaPrefix([BAILEYS_SPEC]);
-
-    if (result.error) {
-      console.error("[WASYS] Baileys npm install başlatılamadı:", result.error.message);
-    } else if (result.status !== 0) {
-      console.error(`[WASYS] Baileys npm install exit ${result.status}`);
+    if (isInstalled() && !isBaileysComplete()) {
+      purgeBrokenBaileys();
     }
 
-    if (!isInstalled()) {
-      console.error(
-        "[WASYS] Baileys hâlâ yok. hPanel → Redeploy (Entry file=server.js) ve npm install loglarını kontrol edin.",
+    if (!isBaileysComplete() && restorePersistentNodeModules()) {
+      console.log("[WASYS] Baileys kalıcı yedekten tamamlandı");
+    }
+
+    if (!isInstalled() || !isBaileysComplete()) {
+      console.warn(
+        `[WASYS] ${BAILEYS_SPEC} eksik veya bozuk — izole kurulum deneniyor (Hostinger node_modules budaması)`,
       );
-      return false;
-    }
-    console.log("[WASYS] Baileys kuruldu");
-  } else {
-    try {
-      const version = require(nmMarker).version;
-      console.log(`[WASYS] Baileys hazır (v${version})`);
-    } catch {
-      console.log("[WASYS] Baileys hazır");
-    }
-  }
 
-  // Paket var ama protobufjs vb. budanmış olabilir — her boot'ta kontrol et.
-  const runtimeOk = ensureBaileysRuntimeDeps();
-  syncVendorCopy();
-  return runtimeOk && (existsSync(vendorEntry) || isInstalled());
+      const result = installViaPrefix([BAILEYS_SPEC, ...BAILEYS_RUNTIME_SPECS]);
+
+      if (result.error) {
+        console.error("[WASYS] Baileys npm install başlatılamadı:", result.error.message);
+      } else if (result.status !== 0) {
+        console.error(`[WASYS] Baileys npm install exit ${result.status}`);
+      }
+
+      if (!isBaileysComplete()) {
+        console.error(
+          "[WASYS] Baileys hâlâ eksik/bozuk. hPanel → Redeploy (Entry file=server.js) ve npm install loglarını kontrol edin.",
+        );
+        return false;
+      }
+      console.log("[WASYS] Baileys kuruldu");
+    } else {
+      try {
+        const version = require(nmMarker).version;
+        console.log(`[WASYS] Baileys hazır (v${version})`);
+      } catch {
+        console.log("[WASYS] Baileys hazır");
+      }
+    }
+
+    const runtimeOk = ensureBaileysRuntimeDeps();
+    if (isBaileysComplete()) {
+      backupPersistentNodeModules();
+    }
+    syncVendorCopy();
+    return runtimeOk && isBaileysComplete();
+  });
 }
 
 if (require.main === module) {
@@ -314,6 +492,7 @@ module.exports = {
   ensureBaileysInstalled,
   ensureGatewayDeps,
   isInstalled,
+  isBaileysComplete,
   syncVendorCopy,
   cleanNpmRenameLeftovers,
   installViaPrefix,
