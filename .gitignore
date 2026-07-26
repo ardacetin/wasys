@@ -49,3 +49,9 @@ next-env.d.ts
 !/public/uploads/.gitkeep
 .env
 !.env.example
+
+# Agent skill caches (local only)
+.agents/
+.claude/
+.windsurf/
+skills-lock.json
