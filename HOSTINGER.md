@@ -85,32 +85,80 @@ test -f /home/u781807728/wasys-data/gateway-sessions.json && echo registry OK
 
 Gereksiz Redeploy yapmayın; yalnızca kod güncellemesinde Redeploy edin.
 
-## WhatsApp / Baileys (`Cannot find package '@whiskeysockets/baileys'`)
+## WhatsApp / Baileys (`Cannot find package …` / `long` / `cacheable`)
 
-Gateway artık `gateway/wa-runtime.mjs` üzerinden çalışır ve Baileys’i
-**bare import olmadan** `gateway/vendor/baileys` veya
-`node_modules/.../lib/index.js` mutlak yolundan yükler.
+Gateway `gateway/wa-runtime.mjs` üzerinden çalışır. Güncel sürüm işaretleri:
 
-`server.js` açılışta + `postinstall` / `npm run build` sırasında
-`scripts/ensure-baileys.cjs` paketi kurar ve vendor’a kopyalar.
+| Ne | Beklenen |
+|----|----------|
+| Gateway loader (log) | `wa-runtime-2026-07-26m` |
+| ensure script (SSH çıktı) | `ensure-baileys script=ensure-baileys-2026-07-26m` |
+| Baileys hazır satırı | `Baileys runtime deps hazır (ESM import OK)` |
 
-Hâlâ hata alıyorsanız:
+**`wa-runtime-2026-07-26l`** veya **`Baileys runtime deps hazır (protobufjs, ws, …)`** görüyorsanız sunucuda **eski deploy** vardır. Hostinger’da **`git pull` çalışmaz** (`fatal: not a git repository`) — kod yalnızca hPanel **Redeploy** ile gelir.
+
+### 1) Kodu güncelle (tercih)
+
+1. hPanel → **Websites** → **Node.js** → wasys.pro
+2. **Entry file** = `server.js`
+3. **Build command** = `npm run build` (varsa)
+4. **Redeploy** (Restart tek başına yeni `scripts/ensure-baileys.cjs` getirmez)
+5. **Restart**
+6. Log: `Baileys yüklendi (wa-runtime-2026-07-26m)`
+
+`server.js` açılışta `scripts/ensure-baileys.cjs` çalıştırır: tam npm ağacı, ESM import testi, yedek `~/wasys-data/baileys-node_modules`.
+
+### 2) Redeploy beklenemiyorsa — SSH (git yok)
+
+```bash
+export PATH="/opt/alt/alt-nodejs22/root/usr/bin:$PATH"
+cd ~/domains/wasys.pro/nodejs
+bash scripts/hostinger-ensure-baileys.sh
+```
+
+Script yoksa (eski deploy):
+
+```bash
+export PATH="/opt/alt/alt-nodejs22/root/usr/bin:$PATH"
+cd ~/domains/wasys.pro/nodejs
+TMP=$(mktemp -d)
+npm install @whiskeysockets/baileys@6.7.22 --prefix "$TMP" --omit=dev --legacy-peer-deps --no-audit --no-fund
+cp -a "$TMP"/node_modules/. ./node_modules/
+rm -rf "$TMP"
+test -f node_modules/long/package.json && echo "long OK"
+node --input-type=module -e "import('file://$HOME/domains/wasys.pro/nodejs/node_modules/@whiskeysockets/baileys/lib/index.js').then(()=>console.log('import OK'))"
+```
+
+**Proje kökünde** `npm install` (next’i güncellemeye çalışan) Hostinger’da **ENOTEMPTY / 503** yapabilir — yalnızca `--prefix` + `cp` kullanın.
+
+Bozuk kalıcı yedek:
+
+```bash
+rm -rf ~/wasys-data/baileys-node_modules
+bash scripts/hostinger-ensure-baileys.sh
+```
+
+Sonra hPanel **Restart**.
+
+### Eski notlar
+
+Gateway Baileys’i `gateway/vendor/baileys` veya `node_modules/.../lib/index.js` mutlak yolundan yükler.
+
+Hâlâ `@whiskeysockets/baileys` yoksa:
 
 1. Entry file = `server.js`
 2. Build command = `npm run build`
-3. hPanel → **Redeploy** (yalnızca Restart yetmeyebilir)
-4. SSH (PATH’e Node ekleyerek):
+3. hPanel → **Redeploy**
+4. SSH:
 
 ```bash
 export PATH="/opt/alt/alt-nodejs22/root/usr/bin:$PATH"
 cd ~/domains/wasys.pro/nodejs
 test -f gateway/wa-runtime.mjs && echo "runtime OK" || echo "ESKİ DEPLOY — Redeploy şart"
-npm install @whiskeysockets/baileys@6.7.22 --omit=dev --legacy-peer-deps
-node scripts/ensure-baileys.cjs
-ls gateway/vendor/baileys/lib/index.js
+bash scripts/hostinger-ensure-baileys.sh
 ```
 
-5. Restart; logda `loader=wa-runtime-2026-07-26` ve `Baileys yüklendi` satırlarını arayın.
+5. Restart; logda `wa-runtime-2026-07-26m` ve `Baileys yüklendi` arayın.
 
 **Error 14 / Unable to open the database file** = klasör yok veya yazma izni yok.
 File Manager veya SSH ile bir kez oluşturun:

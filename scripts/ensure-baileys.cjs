@@ -23,6 +23,8 @@ const { tmpdir } = require("node:os");
 const { dirname, join, resolve } = require("node:path");
 const { pathToFileURL } = require("node:url");
 
+const ENSURE_BAILEYS_SCRIPT_ID = "ensure-baileys-2026-07-26m";
+
 const BAILEYS_SPEC = "@whiskeysockets/baileys@6.7.22";
 const GATEWAY_SPECS = ["qrcode@1.5.4", "pino@10.3.1"];
 /** Baileys paket dosyası varken Hostinger'ın budadığı runtime bağımlılıklar. */
@@ -477,6 +479,7 @@ function ensureGatewayDeps() {
 }
 
 function ensureBaileysInstalled() {
+  console.log(`[WASYS] ensure-baileys script=${ENSURE_BAILEYS_SCRIPT_ID}`);
   return withInstallLock(() => {
     ensureGatewayDeps();
 
