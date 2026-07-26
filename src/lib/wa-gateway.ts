@@ -243,6 +243,13 @@ export const waGateway = {
     text: string;
     jid?: string | null;
   }) {
+    if (globalStore.__wasysGateway) {
+      const result = await globalStore.__wasysGateway.sendText(payload);
+      if (!result?.externalId) {
+        throw new Error("WhatsApp gönderimi kimlik döndürmedi");
+      }
+      return result;
+    }
     try {
       const viaHttp = await gatewayHttp<{ externalId?: string; jid?: string }>(
         "/messages/text",
@@ -259,7 +266,6 @@ export const waGateway = {
         return viaHttp;
       }
     } catch (error) {
-      // HTTP ayaktaysa ama WhatsApp hata verdiyse in-process'e düşme — aynı hata
       if (error instanceof Error && !/abort|ECONNREFUSED|fetch failed/i.test(error.message)) {
         throw error;
       }
@@ -279,6 +285,13 @@ export const waGateway = {
     ptt?: boolean;
     jid?: string | null;
   }) {
+    if (globalStore.__wasysGateway) {
+      const result = await globalStore.__wasysGateway.sendAudio(payload);
+      if (!result?.externalId) {
+        throw new Error("WhatsApp ses gönderimi kimlik döndürmedi");
+      }
+      return result;
+    }
     try {
       const viaHttp = await gatewayHttp<{ externalId?: string; jid?: string }>(
         "/messages/audio",

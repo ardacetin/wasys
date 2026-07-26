@@ -10,6 +10,10 @@ import {
 } from "@/lib/template-shortcuts";
 import { setActiveConversationId } from "@/lib/browser-notifications";
 import { startVisibleInterval } from "@/lib/visible-poll";
+import {
+  explainInvalidSendPhone,
+  normalizeWhatsAppPhone,
+} from "@/lib/whatsapp-phone";
 import { cn, initials } from "@/lib/utils";
 
 function fillTemplate(
@@ -74,6 +78,7 @@ export default function InboxPage() {
   const [assigned, setAssigned] = useState("");
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [shortcutHighlight, setShortcutHighlight] = useState(0);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -87,6 +92,17 @@ export default function InboxPage() {
   );
   const showSlashSuggest =
     !templatesOpen && draft.trim().startsWith("/") && slashSuggestions.length > 0;
+
+  const canSendWhatsApp = useMemo(() => {
+    if (!selected?.channel) return true;
+    if (selected.channel.type !== "WHATSAPP_QR") return true;
+    return Boolean(normalizeWhatsAppPhone(selected.contact.phone));
+  }, [selected]);
+
+  const sendBlockedReason = useMemo(() => {
+    if (!selected || canSendWhatsApp) return null;
+    return explainInvalidSendPhone(selected.contact.phone);
+  }, [selected, canSendWhatsApp]);
 
   const loadConversations = useCallback(async () => {
     const params = new URLSearchParams();
@@ -203,7 +219,12 @@ export default function InboxPage() {
 
   async function sendMessage(body: string, type: "TEXT" | "AUDIO" = "TEXT", mediaUrl?: string) {
     if (!selectedId || !body.trim()) return;
+    if (sendBlockedReason) {
+      setSendError(sendBlockedReason);
+      return;
+    }
     setSending(true);
+    setSendError(null);
     try {
       const controller = new AbortController();
       const timer = window.setTimeout(() => controller.abort(), 70000);
@@ -241,16 +262,16 @@ export default function InboxPage() {
         !data.message;
 
       if (failed) {
-        alert(
+        const msg =
           data.error ||
-            (data.message?.status === "PENDING"
-              ? "Mesaj WhatsApp’a iletilemedi (bekliyor). Kanallar’dan QR bağlantısını yenileyin."
-              : "Mesaj gönderilemedi. Kanallar’dan WhatsApp bağlantısını kontrol edin."),
-        );
+          (data.message?.status === "PENDING"
+            ? "Mesaj WhatsApp’a iletilemedi (bekliyor). Kanallar’dan QR bağlantısını yenileyin."
+            : "Mesaj gönderilemedi. Kanallar’dan WhatsApp bağlantısını kontrol edin.");
+        setSendError(msg);
       }
     } catch (error) {
       const aborted = error instanceof DOMException && error.name === "AbortError";
-      alert(
+      setSendError(
         aborted
           ? "Gönderim zaman aşımına uğradı. WhatsApp kanalını Yenile / yeniden bağlayın."
           : "Ağ hatası — mesaj gönderilemedi.",
@@ -263,6 +284,10 @@ export default function InboxPage() {
   useEffect(() => {
     setShortcutHighlight(0);
   }, [draft, showSlashSuggest]);
+
+  useEffect(() => {
+    setSendError(null);
+  }, [selectedId]);
 
   function insertTemplate(t: Template) {
     setDraft(fillTemplate(t.body, selected?.contact));
@@ -453,6 +478,14 @@ export default function InboxPage() {
             </div>
 
             <div className="relative border-t border-line bg-bg-elevated/90 p-3">
+              {sendError || sendBlockedReason ? (
+                <div
+                  className="mb-3 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger"
+                  role="alert"
+                >
+                  {sendError ?? sendBlockedReason}
+                </div>
+              ) : null}
               {templatesOpen ? (
                 <div className="absolute bottom-full left-3 right-3 z-10 mb-2 max-h-80 overflow-y-auto rounded-2xl border border-line bg-white p-2 shadow-lg">
                   <div className="flex items-center justify-between px-2 py-1">

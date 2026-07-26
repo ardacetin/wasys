@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 /** Deploy doğrulama — UI/log'da bu ID yoksa Hostinger eski gateway dosyasını çalıştırıyordur. */
-export const GATEWAY_LOADER_ID = "wa-runtime-2026-07-26g";
+export const GATEWAY_LOADER_ID = "wa-runtime-2026-07-26h";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -388,6 +388,9 @@ function extractRealPhone(to, preferredJid) {
   if (!phone) return "";
   // LID id telefon gibi görünmesin
   if (lidUser && phone === lidUser) return "";
+  if (phone.length === 10 && phone.startsWith("5")) {
+    phone = `90${phone}`;
+  }
   // WhatsApp LID'leri genelde çok uzun; E.164 pratikte ≤13
   if (phone.length < 8 || phone.length > 13) return "";
   return phone;
@@ -408,58 +411,37 @@ async function resolveOutboundJid(sock, to, preferredJid) {
   const phone = extractRealPhone(to, preferredJid);
   const preferred = normalizeUserJid(preferredJid);
 
-  // 1) Gerçek telefon JID
-  if (phone) {
-    push(`${phone}@s.whatsapp.net`);
-    try {
-      const results = await sock.onWhatsApp(phone);
-      const hit = Array.isArray(results) ? results[0] : null;
-      if (hit?.exists === false) {
-        throw new Error(`Bu numara WhatsApp’ta yok: ${phone}`);
-      }
-      if (hit?.exists && hit.jid) push(hit.jid);
-      // LID'yi burada aday yapma — 6.7'de sık "waiting for this message"
-      if (hit?.lid && phone) {
-        const lidJid = String(hit.lid).includes("@")
-          ? String(hit.lid)
-          : `${hit.lid}@lid`;
-        rememberLidMapping(phone, lidJid);
-      }
-    } catch (err) {
-      if (err instanceof Error && /WhatsApp’ta yok/.test(err.message)) throw err;
-      logger.warn({ err, phone }, "onWhatsApp lookup failed");
-    }
-  }
-
-  // 2) Tercih edilen sohbet JID — LID ise telefonsuz senaryoda
-  if (preferred) {
-    if (preferred.endsWith("@s.whatsapp.net") || preferred.endsWith("@hosted")) {
-      push(preferred);
-    } else if (
-      (preferred.endsWith("@lid") || preferred.endsWith("@hosted.lid")) &&
-      !phone
-    ) {
-      push(preferred);
-    }
-  }
-
-  // 3) Kayıtlı LID yalnızca PN yoksa
-  if (!phone && preferred?.endsWith("@lid")) {
-    /* already pushed */
-  } else if (!candidates.length && preferred?.endsWith("@lid")) {
-    push(preferred);
-  }
-
-  if (!candidates.length && preferred?.endsWith("@lid")) {
-    push(preferred);
-  }
-
-  if (!candidates.length) {
+  if (!phone) {
     throw new Error(
-      "Geçersiz telefon / WhatsApp JID. Kişinin numarası LID olarak kaydolmuş olabilir — yeni bir gelen mesaj bekleyin veya CRM’den numarayı düzeltin.",
+      "Gönderim için gerçek telefon numarası gerekli. Kişi yalnızca WhatsApp gizli ID ile kayıtlı olabilir — yeni gelen mesaj bekleyin veya CRM’de numarayı düzeltin.",
     );
   }
-  return { candidates, phone, lidFallback: preferred?.endsWith("@lid") ? preferred : null };
+
+  // 1) Gerçek telefon JID (yalnızca PN — @lid sessiz başarısızlık yapıyordu)
+  push(`${phone}@s.whatsapp.net`);
+  try {
+    const results = await sock.onWhatsApp(phone);
+    const hit = Array.isArray(results) ? results[0] : null;
+    if (hit?.exists === false) {
+      throw new Error(`Bu numara WhatsApp’ta yok: ${phone}`);
+    }
+    if (hit?.exists && hit.jid) push(hit.jid);
+    if (hit?.lid && phone) {
+      const lidJid = String(hit.lid).includes("@")
+        ? String(hit.lid)
+        : `${hit.lid}@lid`;
+      rememberLidMapping(phone, lidJid);
+    }
+  } catch (err) {
+    if (err instanceof Error && /WhatsApp’ta yok/.test(err.message)) throw err;
+    logger.warn({ err, phone }, "onWhatsApp lookup failed");
+  }
+
+  if (preferred?.endsWith("@s.whatsapp.net") || preferred?.endsWith("@hosted")) {
+    push(preferred);
+  }
+
+  return { candidates, phone, lidFallback: null };
 }
 
 async function sendWithJidFallback(session, to, preferredJid, buildContent) {
@@ -474,16 +456,8 @@ async function sendWithJidFallback(session, to, preferredJid, buildContent) {
     /* ignore */
   }
 
-  const { candidates, phone, lidFallback } = await resolveOutboundJid(
-    sock,
-    to,
-    preferredJid,
-  );
-  // PN denemeleri bittikten sonra (hepsi throw) LID'ye bir kez düş
-  const jids = [...candidates];
-  if (lidFallback && phone && !jids.includes(lidFallback)) {
-    jids.push(lidFallback);
-  }
+  const { candidates, phone } = await resolveOutboundJid(sock, to, preferredJid);
+  const jids = candidates;
 
   let lastError;
 

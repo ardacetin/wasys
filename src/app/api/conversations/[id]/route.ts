@@ -1,9 +1,14 @@
+import type { ChannelStatus } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { waGateway } from "@/lib/wa-gateway";
 import { sendCloudText } from "@/lib/wa-cloud";
+import {
+  explainInvalidSendPhone,
+  normalizeWhatsAppPhone,
+} from "@/lib/whatsapp-phone";
 
 const sendSchema = z.object({
   body: z.string().min(1),
@@ -160,6 +165,8 @@ export async function POST(
   let sendError: string | undefined;
   const preferredJid = conversation.contact.waJid ?? undefined;
 
+  const sendPhone = normalizeWhatsAppPhone(conversation.contact.phone);
+
   try {
     if (conversation.channel.type === "WHATSAPP_QR") {
       if (!conversation.channel.sessionId || conversation.channel.status !== "CONNECTED") {
@@ -168,10 +175,44 @@ export async function POST(
           { status: 400 },
         );
       }
+      if (!sendPhone) {
+        return NextResponse.json(
+          { error: explainInvalidSendPhone(conversation.contact.phone) },
+          { status: 400 },
+        );
+      }
+
+      try {
+        const live = await waGateway.getStatus(conversation.channel.sessionId);
+        if (live.status !== "CONNECTED") {
+          await prisma.channel.update({
+            where: { id: conversation.channel.id },
+            data: {
+              status: live.status as ChannelStatus,
+              lastError: live.lastError ?? null,
+            },
+          }).catch(() => undefined);
+          return NextResponse.json(
+            {
+              error: `WhatsApp şu an bağlı değil (${live.status}). Ayarlar → Kanallar’dan yeniden bağlanın.`,
+            },
+            { status: 503 },
+          );
+        }
+      } catch {
+        return NextResponse.json(
+          {
+            error:
+              "WhatsApp oturumu sunucuda bulunamadı. Kanallar’dan QR ile yeniden bağlanın veya uygulamayı yeniden başlatın.",
+          },
+          { status: 503 },
+        );
+      }
+
       if (payload.type === "AUDIO" && payload.mediaUrl) {
         const result = await waGateway.sendAudio({
           sessionId: conversation.channel.sessionId,
-          to: conversation.contact.phone,
+          to: sendPhone,
           audioUrl: payload.mediaUrl,
           jid: preferredJid,
         });
@@ -188,7 +229,7 @@ export async function POST(
       } else {
         const result = await waGateway.sendText({
           sessionId: conversation.channel.sessionId,
-          to: conversation.contact.phone,
+          to: sendPhone,
           text: payload.body,
           jid: preferredJid,
         });
