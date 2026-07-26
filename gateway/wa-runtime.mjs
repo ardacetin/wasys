@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 /** Deploy doğrulama — UI/log'da bu ID yoksa Hostinger eski gateway dosyasını çalıştırıyordur. */
-export const GATEWAY_LOADER_ID = "wa-runtime-2026-07-26e";
+export const GATEWAY_LOADER_ID = "wa-runtime-2026-07-26f";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -355,8 +355,8 @@ function normalizeUserJid(value) {
 }
 
 /**
- * Gönderim JID'sini çöz: tercih edilen JID → kayıtlı LID → onWhatsApp LID → PN.
- * iOS alıcılar çoğu zaman yalnızca @lid adreslemesini çözebiliyor.
+ * Baileys 6.7.x: önce PN (@s.whatsapp.net), sonra bilinen sohbet JID / LID.
+ * Yanlış @lid → "gönderildi" görünüp karşıda hiç düşmeme / waiting.
  */
 async function resolveOutboundJid(sock, to, preferredJid) {
   const candidates = [];
@@ -365,20 +365,23 @@ async function resolveOutboundJid(sock, to, preferredJid) {
     if (n && !candidates.includes(n)) candidates.push(n);
   };
 
-  // 1) Gelen sohbetten bilinen JID (çoğu zaman @lid)
-  push(preferredJid);
-
   const phone = String(to ?? preferredJid ?? "")
     .split("@")[0]
     .replace(/\D/g, "");
 
-  // 2) Kalıcı PN→LID haritası
+  // 1) Klasik telefon JID (6.7 için en güvenli ilk deneme)
+  if (phone) push(`${phone}@s.whatsapp.net`);
+
+  // 2) Gelen sohbetten bilinen JID
+  push(preferredJid);
+
+  // 3) Kalıcı PN→LID
   if (phone) {
     const mapped = lidByPhone.get(phone);
     if (mapped) push(mapped);
   }
 
-  // 3) onWhatsApp ile canlı LID/PN
+  // 4) onWhatsApp
   if (phone) {
     try {
       const results = await sock.onWhatsApp(phone);
@@ -387,6 +390,7 @@ async function resolveOutboundJid(sock, to, preferredJid) {
         throw new Error(`Bu numara WhatsApp’ta yok: ${phone}`);
       }
       if (hit?.exists) {
+        if (hit.jid) push(hit.jid);
         if (hit.lid) {
           const lidJid = String(hit.lid).includes("@")
             ? String(hit.lid)
@@ -394,7 +398,6 @@ async function resolveOutboundJid(sock, to, preferredJid) {
           push(lidJid);
           rememberLidMapping(phone, lidJid);
         }
-        if (hit.jid) push(hit.jid);
       }
     } catch (err) {
       if (err instanceof Error && /WhatsApp’ta yok/.test(err.message)) throw err;
@@ -402,8 +405,6 @@ async function resolveOutboundJid(sock, to, preferredJid) {
     }
   }
 
-  // 4) Klasik PN JID + ham `to`
-  if (phone) push(`${phone}@s.whatsapp.net`);
   push(to);
 
   if (!candidates.length) {
@@ -412,23 +413,87 @@ async function resolveOutboundJid(sock, to, preferredJid) {
   return candidates;
 }
 
+/** SERVER_ACK (2+) gelmezse karşı tarafa düşmemiş say. */
+function waitForServerAck(sock, messageId, timeoutMs = 10000) {
+  if (!messageId) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (ok) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        sock.ev.off("messages.update", onUpdate);
+      } catch {
+        /* ignore */
+      }
+      resolve(ok);
+    };
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    const onUpdate = (updates) => {
+      for (const u of updates ?? []) {
+        if (u?.key?.id !== messageId) continue;
+        const st = u?.update?.status;
+        // 2 SERVER_ACK, 3 DELIVERY, 4 READ
+        if (typeof st === "number" && st >= 2) {
+          finish(true);
+          return;
+        }
+      }
+    };
+    sock.ev.on("messages.update", onUpdate);
+  });
+}
+
 async function sendWithJidFallback(session, to, preferredJid, buildContent) {
   const sock = session.sock;
+  if (!sock?.sendMessage) {
+    throw new Error("WhatsApp soketi hazır değil");
+  }
+
+  try {
+    await sock.sendPresenceUpdate?.("available");
+  } catch {
+    /* ignore */
+  }
+
   const jids = await resolveOutboundJid(sock, to, preferredJid);
   let lastError;
+  let lastNoAckJid;
 
   for (const jid of jids) {
     try {
       logger.info(
-        { sessionId: session.sessionId, jid, to },
+        { sessionId: session.sessionId, jid, to, loaderId: GATEWAY_LOADER_ID },
         "outbound WhatsApp send attempt",
       );
       const result = await sock.sendMessage(jid, buildContent());
+      const externalId = result?.key?.id;
+      if (!externalId) {
+        throw new Error("sendMessage kimlik (id) döndürmedi");
+      }
+
+      const acked = await waitForServerAck(sock, externalId, 10000);
+      if (!acked) {
+        lastNoAckJid = jid;
+        logger.warn(
+          { sessionId: session.sessionId, jid, externalId },
+          "outbound send got no server ack — trying next jid",
+        );
+        continue;
+      }
+
       const phone = String(to ?? "")
         .split("@")[0]
         .replace(/\D/g, "");
-      if (phone && jid.endsWith("@lid")) rememberLidMapping(phone, jid);
-      return { externalId: result?.key?.id, jid };
+      if (phone && (jid.endsWith("@lid") || jid.endsWith("@s.whatsapp.net"))) {
+        if (jid.endsWith("@lid")) rememberLidMapping(phone, jid);
+      }
+      logger.info(
+        { sessionId: session.sessionId, jid, externalId },
+        "outbound WhatsApp send acked",
+      );
+      return { externalId, jid, acked: true };
     } catch (err) {
       lastError = err;
       logger.warn(
@@ -441,6 +506,12 @@ async function sendWithJidFallback(session, to, preferredJid, buildContent) {
         "outbound send failed for jid — trying next",
       );
     }
+  }
+
+  if (lastNoAckJid && !lastError) {
+    throw new Error(
+      `WhatsApp sunucu onayı gelmedi (son JID: ${lastNoAckJid}). Kanalı Yenile / yeniden QR ile bağlayın.`,
+    );
   }
 
   const detail =
@@ -521,11 +592,14 @@ async function startSocket(session) {
     logger: pino({ level: "silent" }),
     printQRInTerminal: false,
     syncFullHistory: false,
-    markOnlineOnConnect: false,
+    markOnlineOnConnect: true,
     keepAliveIntervalMs: 25_000,
     connectTimeoutMs: 60_000,
     retryRequestDelayMs: 500,
     defaultQueryTimeoutMs: 60_000,
+    // Yeniden gönderim / decrypt için gerekli; yoksa giden mesajlar "takılı" kalabiliyor
+    getMessage: async () => undefined,
+    emitOwnEvents: true,
   });
 
   session.sock = sock;
@@ -856,10 +930,18 @@ export const gatewayOps = {
     const baileysPath = fs.existsSync(vendorEntry)
       ? path.dirname(path.dirname(vendorEntry))
       : path.dirname(path.dirname(nmEntry));
+    const sessionSummary = [...sessions.values()].map((s) => ({
+      sessionId: s.sessionId,
+      status: s.status,
+      hasSock: Boolean(s.sock),
+      phoneNumber: s.phoneNumber ?? null,
+    }));
     return {
       ok: true,
       loaderId: GATEWAY_LOADER_ID,
       sessions: sessions.size,
+      connectedSessions: sessionSummary.filter((s) => s.status === "CONNECTED").length,
+      sessionSummary,
       baileysPath,
       baileysPresent:
         fs.existsSync(vendorEntry) || fs.existsSync(nmEntry),
@@ -988,6 +1070,23 @@ const server = http.createServer(async (req, res) => {
 
 export async function startGateway() {
   ensureAuthDir();
+
+  // İkinci import boş sessions Map ile global'i ezmesin (gönderim kırılıyor,
+  // gelen webhook eski sokette kalıyor).
+  if (
+    globalThis.__wasysGateway &&
+    globalThis.__wasysGatewayLoaderId &&
+    globalThis.__wasysGateway !== gatewayOps
+  ) {
+    logger.warn(
+      {
+        existing: globalThis.__wasysGatewayLoaderId,
+        incoming: GATEWAY_LOADER_ID,
+      },
+      "gateway already bound — keeping existing ops (skip overwrite)",
+    );
+    return false;
+  }
 
   // Ops'u hemen kaydet — site boot'u Baileys yüklemesini beklememeli.
   // İlk QR / session start getBaileys() ile lazy yükler.

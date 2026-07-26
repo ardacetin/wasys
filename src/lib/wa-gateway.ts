@@ -148,22 +148,91 @@ export async function ensureGateway(): Promise<GatewayOps> {
   return globalStore.__wasysGatewayStart;
 }
 
+const GATEWAY_HTTP =
+  process.env.GATEWAY_URL?.replace(/\/$/, "") ||
+  `http://127.0.0.1:${process.env.GATEWAY_PORT || 4001}`;
+const GATEWAY_SECRET = process.env.GATEWAY_SECRET ?? "wasys-gateway-secret";
+
+/**
+ * Gönderimi önce local gateway HTTP'ye dene (server.js'teki canlı soket),
+ * olmazsa in-process ops. Çift ESM örneği yüzünden boş Map'e yazmayı önler.
+ */
+async function gatewayHttp<T>(
+  path: string,
+  init?: RequestInit & { timeoutMs?: number },
+): Promise<T | null> {
+  const timeoutMs = init?.timeoutMs ?? 45000;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${GATEWAY_HTTP}${path}`, {
+      ...init,
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        "x-gateway-secret": GATEWAY_SECRET,
+        ...(init?.headers ?? {}),
+      },
+      cache: "no-store",
+    });
+    const data = (await res.json().catch(() => ({}))) as T & { error?: string };
+    if (!res.ok) {
+      throw new Error(
+        typeof data?.error === "string" ? data.error : `Gateway HTTP ${res.status}`,
+      );
+    }
+    return data as T;
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (/abort|ECONNREFUSED|fetch failed/i.test(msg)) return null;
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export const waGateway = {
   async startSession(payload: {
     channelId: string;
     sessionId: string;
     webhookUrl: string;
   }) {
+    const viaHttp = await gatewayHttp<{
+      ok: boolean;
+      status: string;
+      qrDataUrl?: string;
+      phoneNumber?: string;
+    }>("/sessions/start", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeoutMs: 20000,
+    }).catch(() => null);
+    if (viaHttp) return viaHttp;
     const ops = await ensureGateway();
     return ops.startSession(payload);
   },
 
   async getStatus(sessionId: string) {
+    const viaHttp = await gatewayHttp<{
+      status: string;
+      qrDataUrl?: string;
+      phoneNumber?: string;
+      lastError?: string;
+    }>(`/sessions/${encodeURIComponent(sessionId)}/status`, {
+      method: "GET",
+      timeoutMs: 8000,
+    }).catch(() => null);
+    if (viaHttp) return viaHttp;
     const ops = await ensureGateway();
     return ops.getStatus(sessionId);
   },
 
   async stopSession(sessionId: string) {
+    const viaHttp = await gatewayHttp<{ ok: boolean }>(
+      `/sessions/${encodeURIComponent(sessionId)}/stop`,
+      { method: "POST", body: "{}", timeoutMs: 15000 },
+    ).catch(() => null);
+    if (viaHttp) return viaHttp;
     const ops = await ensureGateway();
     return ops.stopSession(sessionId);
   },
@@ -174,8 +243,33 @@ export const waGateway = {
     text: string;
     jid?: string | null;
   }) {
+    try {
+      const viaHttp = await gatewayHttp<{ externalId?: string; jid?: string }>(
+        "/messages/text",
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+          timeoutMs: 60000,
+        },
+      );
+      if (viaHttp) {
+        if (!viaHttp.externalId) {
+          throw new Error("Gateway gönderdi ama mesaj kimliği yok");
+        }
+        return viaHttp;
+      }
+    } catch (error) {
+      // HTTP ayaktaysa ama WhatsApp hata verdiyse in-process'e düşme — aynı hata
+      if (error instanceof Error && !/abort|ECONNREFUSED|fetch failed/i.test(error.message)) {
+        throw error;
+      }
+    }
     const ops = await ensureGateway();
-    return ops.sendText(payload);
+    const result = await ops.sendText(payload);
+    if (!result?.externalId) {
+      throw new Error("WhatsApp gönderimi kimlik döndürmedi");
+    }
+    return result;
   },
 
   async sendAudio(payload: {
@@ -185,8 +279,32 @@ export const waGateway = {
     ptt?: boolean;
     jid?: string | null;
   }) {
+    try {
+      const viaHttp = await gatewayHttp<{ externalId?: string; jid?: string }>(
+        "/messages/audio",
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+          timeoutMs: 90000,
+        },
+      );
+      if (viaHttp) {
+        if (!viaHttp.externalId) {
+          throw new Error("Gateway gönderdi ama mesaj kimliği yok");
+        }
+        return viaHttp;
+      }
+    } catch (error) {
+      if (error instanceof Error && !/abort|ECONNREFUSED|fetch failed/i.test(error.message)) {
+        throw error;
+      }
+    }
     const ops = await ensureGateway();
-    return ops.sendAudio(payload);
+    const result = await ops.sendAudio(payload);
+    if (!result?.externalId) {
+      throw new Error("WhatsApp ses gönderimi kimlik döndürmedi");
+    }
+    return result;
   },
 };
 

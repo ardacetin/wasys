@@ -150,22 +150,50 @@ export default function InboxPage() {
   async function sendMessage(body: string, type: "TEXT" | "AUDIO" = "TEXT", mediaUrl?: string) {
     if (!selectedId || !body.trim()) return;
     setSending(true);
-    const res = await fetch(`/api/conversations/${selectedId}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ body, type, mediaUrl }),
-    });
-    const data = await res.json().catch(() => ({}));
-    setSending(false);
-    if (data.message) {
-      setMessages((prev) => [...prev, data.message]);
-      if (data.message.status !== "FAILED") {
-        setDraft("");
+    try {
+      const controller = new AbortController();
+      const timer = window.setTimeout(() => controller.abort(), 70000);
+      const res = await fetch(`/api/conversations/${selectedId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body, type, mediaUrl }),
+        signal: controller.signal,
+      }).finally(() => window.clearTimeout(timer));
+
+      const data = await res.json().catch(() => ({} as { message?: { status?: string }; error?: string }));
+
+      if (data.message) {
+        setMessages((prev) => [...prev, data.message]);
+        if (data.message.status === "SENT" || data.message.status === "DELIVERED") {
+          setDraft("");
+        }
+        void loadConversations();
       }
-      void loadConversations();
-    }
-    if (data.error || data.message?.status === "FAILED") {
-      alert(data.error || "Mesaj WhatsApp’a iletilemedi. Kanal bağlantısını kontrol edin.");
+
+      const failed =
+        !res.ok ||
+        Boolean(data.error) ||
+        data.message?.status === "FAILED" ||
+        data.message?.status === "PENDING" ||
+        !data.message;
+
+      if (failed) {
+        alert(
+          data.error ||
+            (data.message?.status === "PENDING"
+              ? "Mesaj WhatsApp’a iletilemedi (bekliyor). Kanallar’dan QR bağlantısını yenileyin."
+              : "Mesaj gönderilemedi. Kanallar’dan WhatsApp bağlantısını kontrol edin."),
+        );
+      }
+    } catch (error) {
+      const aborted = error instanceof DOMException && error.name === "AbortError";
+      alert(
+        aborted
+          ? "Gönderim zaman aşımına uğradı. WhatsApp kanalını Yenile / yeniden bağlayın."
+          : "Ağ hatası — mesaj gönderilemedi.",
+      );
+    } finally {
+      setSending(false);
     }
   }
 

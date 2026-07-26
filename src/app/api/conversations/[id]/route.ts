@@ -92,11 +92,14 @@ export async function POST(
           jid: preferredJid,
         });
         externalId = result.externalId;
+        if (!externalId) {
+          throw new Error("WhatsApp mesaj kimliği alınamadı");
+        }
         if (result.jid && result.jid !== preferredJid) {
           await prisma.contact.update({
             where: { id: conversation.contact.id },
             data: { waJid: result.jid },
-          });
+          }).catch(() => undefined);
         }
       } else {
         const result = await waGateway.sendText({
@@ -106,11 +109,14 @@ export async function POST(
           jid: preferredJid,
         });
         externalId = result.externalId;
+        if (!externalId) {
+          throw new Error("WhatsApp mesaj kimliği alınamadı");
+        }
         if (result.jid && result.jid !== preferredJid) {
           await prisma.contact.update({
             where: { id: conversation.contact.id },
             data: { waJid: result.jid },
-          });
+          }).catch(() => undefined);
         }
       }
       status = "SENT";
