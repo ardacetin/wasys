@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 /** Deploy doğrulama — UI/log'da bu ID yoksa Hostinger eski gateway dosyasını çalıştırıyordur. */
-export const GATEWAY_LOADER_ID = "wa-runtime-2026-07-26m";
+export const GATEWAY_LOADER_ID = "wa-runtime-2026-07-26n";
 
 function getConnectedSessionForChannel(channelId) {
   if (!channelId) return null;
@@ -566,6 +566,8 @@ async function sendWithJidFallback(session, to, preferredJid, buildContent) {
 
   const { candidates, phone } = await resolveOutboundJid(sock, to, preferredJid);
   const jids = candidates;
+  const lidPreferredChat = isLidJid(normalizeUserJid(preferredJid));
+  let sawLidDeliveryMiss = false;
 
   // #region agent log
   agentDebugLog(
@@ -577,6 +579,7 @@ async function sendWithJidFallback(session, to, preferredJid, buildContent) {
       candidateCount: jids.length,
       jids: jids.map((j) => (j.includes("@") ? j.split("@")[1] : j)),
       phoneLen: phone?.length ?? 0,
+      lidPreferredChat,
     },
     "B",
   );
@@ -610,15 +613,41 @@ async function sendWithJidFallback(session, to, preferredJid, buildContent) {
         );
         // #endregion
         if (!delivered) {
+          sawLidDeliveryMiss = true;
           logger.warn(
             { sessionId: session.sessionId, jid, externalId, phone },
             "LID send got id but no delivery — trying next jid",
           );
           continue;
         }
+      } else if (lidPreferredChat || sawLidDeliveryMiss) {
+        // iOS/Meta LID sohbet: PN ile id gelir ama karşıya düşmez — teslimat şart.
+        const delivered = await waitForOutboundStatus(sock, result.key, 3, 12000);
+        // #region agent log
+        agentDebugLog(
+          "wa-runtime.mjs:sendWithJidFallback",
+          "PN delivery wait (LID chat)",
+          { jid, externalId, delivered, lidPreferredChat, sawLidDeliveryMiss },
+          "E",
+        );
+        // #endregion
+        if (!delivered) {
+          logger.warn(
+            { sessionId: session.sessionId, jid, externalId, phone },
+            "PN send got id but no delivery in LID chat — trying next jid",
+          );
+          continue;
+        }
       }
 
-      // Başarılı kabul: Baileys id döndü. ACK event'i bekleme (false negative).
+      // #region agent log
+      agentDebugLog(
+        "wa-runtime.mjs:sendWithJidFallback",
+        "outbound send accepted",
+        { jid, externalId, isLid: isLidJid(jid) },
+        "E",
+      );
+      // #endregion
       logger.info(
         { sessionId: session.sessionId, jid, externalId },
         "outbound WhatsApp send accepted",
@@ -644,7 +673,7 @@ async function sendWithJidFallback(session, to, preferredJid, buildContent) {
   const detail =
     lastError instanceof Error ? lastError.message : String(lastError ?? "send failed");
   throw new Error(
-    `WhatsApp gönderilemedi: ${detail}. LID sohbetlerinde kişinin size yeni mesaj atması ve CRM’de doğru numara + waJid olması gerekir.`,
+    `WhatsApp gönderilemedi: ${detail}. ${lidPreferredChat || sawLidDeliveryMiss ? "Bu sohbet LID (iOS/reklam); kişinin size yeni mesaj atması ve CRM’de doğru numara + waJid gerekir." : "Kanallar’dan bağlantıyı yenileyin."}`,
   );
 }
 
