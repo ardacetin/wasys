@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { isOrgAdmin } from "@/lib/roles";
 
 export async function GET() {
   const session = await auth();
@@ -26,13 +27,31 @@ export async function POST(req: Request) {
   if (!session?.user?.organizationId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  if (!isOrgAdmin(session.user.role)) {
+    return NextResponse.json(
+      { error: "Etiketleri yalnızca yönetici ekleyebilir" },
+      { status: 403 },
+    );
+  }
 
-  const data = schema.parse(await req.json());
-  const tag = await prisma.tag.create({
-    data: {
-      organizationId: session.user.organizationId,
-      ...data,
-    },
-  });
-  return NextResponse.json({ tag });
+  const parsed = schema.safeParse(await req.json());
+  if (!parsed.success) {
+    return NextResponse.json({ error: "Geçersiz etiket verisi" }, { status: 400 });
+  }
+
+  try {
+    const tag = await prisma.tag.create({
+      data: {
+        organizationId: session.user.organizationId,
+        name: parsed.data.name.trim(),
+        color: parsed.data.color,
+      },
+    });
+    return NextResponse.json({ tag });
+  } catch {
+    return NextResponse.json(
+      { error: "Bu isimde bir etiket zaten var" },
+      { status: 409 },
+    );
+  }
 }

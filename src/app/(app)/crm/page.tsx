@@ -69,29 +69,69 @@ export default function CrmPage() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [q, setQ] = useState("");
   const [stageFilter, setStageFilter] = useState<Stage | "">("");
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const [selected, setSelected] = useState<ContactDetail | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [error, setError] = useState("");
   const [detailError, setDetailError] = useState("");
   const [noteDraft, setNoteDraft] = useState("");
   const [busy, setBusy] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const load = useCallback(async () => {
     const params = new URLSearchParams();
     if (q.trim()) params.set("q", q.trim());
     if (stageFilter) params.set("stage", stageFilter);
+    params.set("page", String(page));
     const res = await fetch(`/api/contacts?${params}`, { cache: "no-store" });
     const data = await res.json();
     if (res.ok) {
       setContacts(data.contacts ?? []);
       setSummary(data.summary ?? null);
+      setTotal(data.total ?? 0);
+      setTotalPages(data.totalPages ?? 1);
+      setPageSize(data.pageSize ?? 20);
+      if (data.page && data.page !== page) setPage(data.page);
     }
+  }, [q, stageFilter, page]);
+
+  useEffect(() => {
+    setPage(1);
   }, [q, stageFilter]);
 
   useEffect(() => {
     const t = setTimeout(() => void load(), 250);
     return () => clearTimeout(t);
   }, [load]);
+
+  async function exportExcel() {
+    setExporting(true);
+    try {
+      const params = new URLSearchParams();
+      if (q.trim()) params.set("q", q.trim());
+      if (stageFilter) params.set("stage", stageFilter);
+      const res = await fetch(`/api/export/crm?${params}`, { cache: "no-store" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error ?? "Excel dışa aktarılamadı");
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `wasys-crm-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } finally {
+      setExporting(false);
+    }
+  }
 
   async function openDetail(id: string) {
     setDetailError("");
@@ -215,12 +255,22 @@ export default function CrmPage() {
             Müşteri kartları, satış aşamaları ve notlar
           </p>
         </div>
-        <button
-          onClick={() => setShowCreate((v) => !v)}
-          className="rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white"
-        >
-          {showCreate ? "Vazgeç" : "Yeni kişi"}
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void exportExcel()}
+            disabled={exporting || total === 0}
+            className="rounded-xl border border-line bg-white px-4 py-2 text-sm font-medium text-ink disabled:opacity-50"
+          >
+            {exporting ? "Hazırlanıyor…" : "Excel’e aktar"}
+          </button>
+          <button
+            onClick={() => setShowCreate((v) => !v)}
+            className="rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white"
+          >
+            {showCreate ? "Vazgeç" : "Yeni kişi"}
+          </button>
+        </div>
       </div>
 
       {summary ? (
@@ -338,6 +388,32 @@ export default function CrmPage() {
               ) : null}
             </tbody>
           </table>
+          {total > 0 ? (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-4 py-3 text-sm">
+              <span className="text-ink-muted">
+                {total} kayıt · sayfa {page} / {totalPages}
+                {pageSize ? ` · ${pageSize}/sayfa` : null}
+              </span>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  className="rounded-xl border border-line px-3 py-1.5 disabled:opacity-40"
+                >
+                  Önceki
+                </button>
+                <button
+                  type="button"
+                  disabled={page >= totalPages}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  className="rounded-xl border border-line px-3 py-1.5 disabled:opacity-40"
+                >
+                  Sonraki
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
 
         {selected ? (

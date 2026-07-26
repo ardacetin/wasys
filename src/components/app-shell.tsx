@@ -12,9 +12,9 @@ import {
   GitBranch,
   Inbox,
   LayoutDashboard,
-  MessageSquareText,
   Radio,
   Settings,
+  Tags,
   Users,
   Zap,
 } from "lucide-react";
@@ -28,7 +28,7 @@ const tenantLinks = [
   { href: "/settings/channels", label: "Kanallar", icon: Radio },
   { href: "/settings/rules", label: "Atama kuralları", icon: GitBranch },
   { href: "/settings/automation", label: "Otomasyon", icon: Zap },
-  { href: "/settings/templates", label: "Şablonlar", icon: MessageSquareText },
+  { href: "/settings/library", label: "Etiketler & şablonlar", icon: Tags },
   { href: "/settings/team", label: "Ekip", icon: Users },
   { href: "/settings/plan", label: "Paket", icon: Settings },
 ];

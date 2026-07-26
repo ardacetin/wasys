@@ -37,6 +37,43 @@ export async function buildContactsExcel(rows: ContactExportRow[]) {
   return workbookToBuffer(workbook);
 }
 
+export type CrmContactExportRow = {
+  name: string;
+  phone: string;
+  email: string;
+  company: string;
+  stage: string;
+  dealValue: number | string;
+  notes: string;
+  conversations: number;
+  noteCount: number;
+  updatedAt: string;
+};
+
+export async function buildCrmContactsExcel(rows: CrmContactExportRow[]) {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = "WASYS";
+  workbook.created = new Date();
+
+  const sheet = workbook.addWorksheet("CRM");
+  sheet.columns = [
+    { header: "Ad Soyad", key: "name", width: 28 },
+    { header: "Telefon", key: "phone", width: 18 },
+    { header: "E-posta", key: "email", width: 28 },
+    { header: "Firma", key: "company", width: 24 },
+    { header: "Aşama", key: "stage", width: 14 },
+    { header: "Fırsat (₺)", key: "dealValue", width: 14 },
+    { header: "Notlar", key: "notes", width: 40 },
+    { header: "Sohbet sayısı", key: "conversations", width: 14 },
+    { header: "CRM not sayısı", key: "noteCount", width: 14 },
+    { header: "Güncellendi", key: "updatedAt", width: 20 },
+  ];
+  styleHeader(sheet);
+  for (const row of rows) sheet.addRow(row);
+
+  return workbookToBuffer(workbook);
+}
+
 export async function buildMessagesExcel(rows: MessageExportRow[]) {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "WASYS";

@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import type { CrmStage, Prisma } from "@prisma/client";
 
 const STAGES: CrmStage[] = ["LEAD", "CONTACTED", "PROPOSAL", "WON", "LOST"];
+const PAGE_SIZE = 20;
 
 export async function GET(req: Request) {
   const session = await auth();
@@ -16,6 +17,8 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const q = searchParams.get("q")?.trim();
   const stage = searchParams.get("stage");
+  const pageRaw = Number(searchParams.get("page") ?? "1");
+  const page = Number.isFinite(pageRaw) && pageRaw > 0 ? Math.floor(pageRaw) : 1;
 
   const where: Prisma.ContactWhereInput = {
     organizationId,
@@ -34,14 +37,16 @@ export async function GET(req: Request) {
       : {}),
   };
 
-  const [contacts, grouped] = await Promise.all([
+  const [total, contacts, grouped] = await Promise.all([
+    prisma.contact.count({ where }),
     prisma.contact.findMany({
       where,
       include: {
         _count: { select: { conversations: true, crmNotes: true } },
       },
       orderBy: { updatedAt: "desc" },
-      take: 200,
+      skip: (page - 1) * PAGE_SIZE,
+      take: PAGE_SIZE,
     }),
     prisma.contact.groupBy({
       by: ["crmStage"],
@@ -58,7 +63,16 @@ export async function GET(req: Request) {
     }),
   );
 
-  return NextResponse.json({ contacts, summary });
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  return NextResponse.json({
+    contacts,
+    summary,
+    page,
+    pageSize: PAGE_SIZE,
+    total,
+    totalPages,
+  });
 }
 
 const createSchema = z.object({

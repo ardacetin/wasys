@@ -3,12 +3,10 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { isOrgAdmin } from "@/lib/roles";
-import { normalizeShortcut } from "@/lib/template-shortcuts";
 
 const updateSchema = z.object({
-  title: z.string().min(1).optional(),
-  body: z.string().min(1).optional(),
-  shortcut: z.string().nullable().optional(),
+  name: z.string().trim().min(1).max(60).optional(),
+  color: z.string().trim().min(4).max(32).optional(),
 });
 
 export async function PATCH(
@@ -21,13 +19,13 @@ export async function PATCH(
   }
   if (!isOrgAdmin(session.user.role)) {
     return NextResponse.json(
-      { error: "Şablonları yalnızca yönetici düzenleyebilir" },
+      { error: "Etiketleri yalnızca yönetici düzenleyebilir" },
       { status: 403 },
     );
   }
 
   const { id } = await ctx.params;
-  const existing = await prisma.messageTemplate.findFirst({
+  const existing = await prisma.tag.findFirst({
     where: { id, organizationId: session.user.organizationId },
   });
   if (!existing) {
@@ -39,16 +37,18 @@ export async function PATCH(
     return NextResponse.json({ error: "Geçersiz veri" }, { status: 400 });
   }
 
-  const data = { ...parsed.data };
-  if ("shortcut" in data) {
-    data.shortcut = normalizeShortcut(data.shortcut);
+  try {
+    const tag = await prisma.tag.update({
+      where: { id },
+      data: parsed.data,
+    });
+    return NextResponse.json({ tag });
+  } catch {
+    return NextResponse.json(
+      { error: "Bu isimde bir etiket zaten var" },
+      { status: 409 },
+    );
   }
-
-  const template = await prisma.messageTemplate.update({
-    where: { id },
-    data,
-  });
-  return NextResponse.json({ template });
 }
 
 export async function DELETE(
@@ -61,19 +61,19 @@ export async function DELETE(
   }
   if (!isOrgAdmin(session.user.role)) {
     return NextResponse.json(
-      { error: "Şablonları yalnızca yönetici silebilir" },
+      { error: "Etiketleri yalnızca yönetici silebilir" },
       { status: 403 },
     );
   }
 
   const { id } = await ctx.params;
-  const existing = await prisma.messageTemplate.findFirst({
+  const existing = await prisma.tag.findFirst({
     where: { id, organizationId: session.user.organizationId },
   });
   if (!existing) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  await prisma.messageTemplate.delete({ where: { id } });
+  await prisma.tag.delete({ where: { id } });
   return NextResponse.json({ ok: true });
 }

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { isOrgAdmin } from "@/lib/roles";
 import { normalizeShortcut } from "@/lib/template-shortcuts";
 
 export async function GET() {
@@ -27,6 +28,12 @@ export async function POST(req: Request) {
   const session = await auth();
   if (!session?.user?.organizationId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (!isOrgAdmin(session.user.role)) {
+    return NextResponse.json(
+      { error: "Şablonları yalnızca yönetici ekleyebilir" },
+      { status: 403 },
+    );
   }
 
   const parsed = schema.safeParse(await req.json());
