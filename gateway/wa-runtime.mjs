@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 /** Deploy doğrulama — UI/log'da bu ID yoksa Hostinger eski gateway dosyasını çalıştırıyordur. */
-export const GATEWAY_LOADER_ID = "wa-runtime-2026-07-26c";
+export const GATEWAY_LOADER_ID = "wa-runtime-2026-07-26d";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -213,28 +213,90 @@ async function notifyWebhook(session, event, payload) {
           "in-process webhook returned error status",
         );
       }
+      return;
     } catch (err) {
       logger.error({ err, sessionId: session.sessionId }, "in-process webhook failed");
     }
-    return;
   }
 
-  try {
-    await fetch(session.webhookUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-gateway-secret": SECRET,
-      },
-      body: JSON.stringify(body),
-    });
-  } catch (err) {
-    logger.error({ err, sessionId: session.sessionId }, "webhook failed");
+  // Köprü henüz yüklenmediyse aynı süreçteki Next HTTP'ye düş (Hostinger)
+  const appPort = Number(process.env.PORT || 3000);
+  const candidates = [
+    `http://127.0.0.1:${appPort}/api/webhooks/wa-gateway`,
+    session.webhookUrl,
+  ].filter(Boolean);
+
+  let delivered = false;
+  for (const url of candidates) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-gateway-secret": SECRET,
+        },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        delivered = true;
+        // İlk başarılı HTTP, sonraki olaylar için köprüyü doldurmuş olur
+        break;
+      }
+      logger.warn(
+        { event, url, status: res.status },
+        "webhook HTTP non-OK",
+      );
+    } catch (err) {
+      logger.warn(
+        { err, event, url },
+        "webhook HTTP failed",
+      );
+    }
+  }
+
+  if (!delivered) {
+    logger.error(
+      { event, sessionId: session.sessionId },
+      "webhook delivery failed (in-process + HTTP)",
+    );
   }
 }
 
 function jidToPhone(jid) {
-  return jid.split("@")[0]?.split(":")[0] ?? jid;
+  if (!jid || typeof jid !== "string") return "";
+  return jid.split("@")[0]?.split(":")[0] ?? "";
+}
+
+/** LID (@lid) veya alternatif alanlardan gerçek telefonu çıkar. */
+function resolveSenderPhone(msg) {
+  const candidates = [
+    msg.key?.senderPn,
+    msg.key?.participantPn,
+    msg.key?.remoteJidAlt,
+    msg.key?.participant,
+    msg.key?.remoteJid,
+  ];
+  for (const jid of candidates) {
+    if (!jid || typeof jid !== "string") continue;
+    if (jid.endsWith("@lid") || jid.endsWith("@g.us")) continue;
+    if (jid === "status@broadcast" || jid.endsWith("@broadcast")) continue;
+    if (jid.endsWith("@newsletter")) continue;
+    const phone = jidToPhone(jid).replace(/\D/g, "");
+    if (phone.length >= 8 && phone.length <= 15) return phone;
+  }
+  return "";
+}
+
+function unwrapMessageContent(message) {
+  if (!message) return null;
+  return (
+    message.ephemeralMessage?.message ||
+    message.viewOnceMessage?.message ||
+    message.viewOnceMessageV2?.message ||
+    message.viewOnceMessageV2Extension?.message ||
+    message.documentWithCaptionMessage?.message ||
+    message
+  );
 }
 
 function clearReconnectTimer(session) {
@@ -422,9 +484,15 @@ async function startSocket(session) {
   });
 
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
-    if (type !== "notify") return;
+    // Baileys: gerçek zamanlı mesajlar çoğu zaman "notify"; geçmiş/senkron "append".
+    // Yalnızca notify dinlemek gelen mesajları yutuyordu.
+    if (type !== "notify" && type !== "append") return;
     for (const msg of messages) {
-      await handleIncoming(session, msg, downloadMediaMessage);
+      try {
+        await handleIncoming(session, msg, downloadMediaMessage);
+      } catch (err) {
+        logger.error({ err, type }, "handleIncoming failed");
+      }
     }
   });
 
@@ -447,24 +515,44 @@ async function startSocket(session) {
 }
 
 async function handleIncoming(session, msg, downloadMediaMessage) {
-  if (msg.key.fromMe) return;
-  const remote = msg.key.remoteJid;
+  if (msg.key?.fromMe) return;
+  const remote = msg.key?.remoteJid;
   if (!remote || remote.endsWith("@g.us") || remote === "status@broadcast") return;
+  if (remote.endsWith("@newsletter") || remote.endsWith("@broadcast")) return;
 
-  const from = jidToPhone(remote);
+  const from = resolveSenderPhone(msg);
+  if (!from) {
+    logger.warn(
+      {
+        sessionId: session.sessionId,
+        remoteJid: remote,
+        senderPn: msg.key?.senderPn,
+      },
+      "incoming message skipped — phone unresolved (LID?)",
+    );
+    return;
+  }
+
+  const content = unwrapMessageContent(msg.message);
+  if (!content) {
+    // protocolMessage / revoke vb. — yoksay
+    return;
+  }
+
   const pushName = msg.pushName ?? null;
   let type = "TEXT";
   let body =
-    msg.message?.conversation ??
-    msg.message?.extendedTextMessage?.text ??
-    msg.message?.imageMessage?.caption ??
-    msg.message?.videoMessage?.caption ??
+    content.conversation ??
+    content.extendedTextMessage?.text ??
+    content.imageMessage?.caption ??
+    content.videoMessage?.caption ??
+    content.documentMessage?.caption ??
     null;
   let mediaUrl = null;
   let mediaMimeType = null;
 
   try {
-    if (msg.message?.audioMessage) {
+    if (content.audioMessage) {
       type = "AUDIO";
       const buffer = await downloadMediaMessage(msg, "buffer", {});
       const fileName = `wa_${session.sessionId}_${Date.now()}.ogg`;
@@ -473,16 +561,35 @@ async function handleIncoming(session, msg, downloadMediaMessage) {
       const filePath = path.join(publicDir, fileName);
       fs.writeFileSync(filePath, buffer);
       mediaUrl = `/uploads/${fileName}`;
-      mediaMimeType = msg.message.audioMessage.mimetype ?? "audio/ogg";
+      mediaMimeType = content.audioMessage.mimetype ?? "audio/ogg";
       body = body ?? "";
-    } else if (msg.message?.imageMessage) {
+    } else if (content.imageMessage) {
       type = "IMAGE";
-    } else if (msg.message?.documentMessage) {
+      body = body ?? "";
+    } else if (content.documentMessage) {
       type = "DOCUMENT";
+      body = body ?? content.documentMessage.fileName ?? "";
+    } else if (content.stickerMessage) {
+      type = "IMAGE";
+      body = body ?? "";
+    } else if (content.videoMessage) {
+      type = "VIDEO";
+      body = body ?? "";
+    } else if (!body) {
+      logger.info(
+        { keys: Object.keys(content), from },
+        "incoming non-text content ignored",
+      );
+      return;
     }
   } catch (err) {
     logger.warn({ err }, "media download failed");
   }
+
+  logger.info(
+    { from, type, sessionId: session.sessionId, id: msg.key?.id },
+    "incoming WhatsApp message",
+  );
 
   await notifyWebhook(session, "message", {
     from,
@@ -495,22 +602,33 @@ async function handleIncoming(session, msg, downloadMediaMessage) {
   });
 }
 
-async function sendText(sessionId, to, text) {
+async function ensureConnectedSession(sessionId) {
   const session = sessions.get(sessionId);
-  if (!session?.sock || session.status !== "CONNECTED") {
-    throw new Error("Session not connected");
+  if (session?.sock && session.status === "CONNECTED") return session;
+  if (session && session.status !== "CONNECTED") {
+    throw new Error(
+      `WhatsApp oturumu bağlı değil (durum: ${session.status}). Kanallar’dan yeniden bağlanın.`,
+    );
   }
-  const jid = `${to.replace(/\D/g, "")}@s.whatsapp.net`;
+  throw new Error(
+    "WhatsApp oturumu bellekten düşmüş. Kanallar’da QR ile bir kez Yenile / Bağlan yapın veya uygulamayı Restart edin.",
+  );
+}
+
+async function sendText(sessionId, to, text) {
+  const session = await ensureConnectedSession(sessionId);
+  const phone = String(to).replace(/\D/g, "");
+  if (phone.length < 8) throw new Error("Geçersiz telefon numarası");
+  const jid = `${phone}@s.whatsapp.net`;
   const result = await session.sock.sendMessage(jid, { text });
   return { externalId: result?.key?.id };
 }
 
 async function sendAudio(sessionId, to, audioUrl, ptt = true) {
-  const session = sessions.get(sessionId);
-  if (!session?.sock || session.status !== "CONNECTED") {
-    throw new Error("Session not connected");
-  }
-  const jid = `${to.replace(/\D/g, "")}@s.whatsapp.net`;
+  const session = await ensureConnectedSession(sessionId);
+  const phone = String(to).replace(/\D/g, "");
+  if (phone.length < 8) throw new Error("Geçersiz telefon numarası");
+  const jid = `${phone}@s.whatsapp.net`;
   const localPath = audioUrl.startsWith("/")
     ? path.join(process.cwd(), "public", audioUrl.replace(/^\//, ""))
     : audioUrl;

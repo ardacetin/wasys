@@ -241,6 +241,31 @@ app
           console.log(
             `[WASYS] WhatsApp gateway ready loader=${GATEWAY_LOADER_ID || "?"} (in-process${listening ? ` + http://127.0.0.1:${process.env.GATEWAY_PORT || 4001}` : " only"})`,
           );
+
+          // gateway-webhook köprüsünü yükle (mesajların in-process işlenmesi)
+          try {
+            const secret =
+              process.env.GATEWAY_SECRET || "wasys-gateway-secret";
+            const ping = await fetch(
+              `http://127.0.0.1:${port}/api/webhooks/wa-gateway`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "x-gateway-secret": secret,
+                },
+                body: JSON.stringify({ event: "ping" }),
+              },
+            );
+            console.log(
+              `[WASYS] gateway webhook bridge ping HTTP ${ping.status}`,
+            );
+          } catch (bridgeErr) {
+            console.warn(
+              "[WASYS] gateway webhook bridge ping failed",
+              bridgeErr,
+            );
+          }
         } catch (error) {
           console.error("[WASYS] WhatsApp gateway failed to start", error);
         }
