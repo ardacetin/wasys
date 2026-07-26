@@ -9,36 +9,75 @@ import {
   BookUser,
   Building2,
   ClipboardList,
+  CreditCard,
   GitBranch,
   Inbox,
   LayoutDashboard,
   Radio,
-  Settings,
   Tags,
   Users,
   Zap,
+  type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NewMessageNotifier } from "@/components/new-message-notifier";
 
-const tenantLinks = [
+type NavLink = { href: string; label: string; icon: LucideIcon };
+
+const tenantMainLinks: NavLink[] = [
   { href: "/inbox", label: "Gelen kutusu", icon: Inbox },
   { href: "/crm", label: "CRM", icon: BookUser },
   { href: "/reports", label: "Raporlar", icon: BarChart3 },
+];
+
+const tenantSettingsLinks: NavLink[] = [
   { href: "/settings/channels", label: "Kanallar", icon: Radio },
   { href: "/settings/rules", label: "Atama kuralları", icon: GitBranch },
   { href: "/settings/automation", label: "Otomasyon", icon: Zap },
   { href: "/settings/library", label: "Etiketler & şablonlar", icon: Tags },
   { href: "/settings/team", label: "Ekip", icon: Users },
-  { href: "/settings/plan", label: "Paket", icon: Settings },
+  { href: "/settings/plan", label: "Paket", icon: CreditCard },
 ];
 
-const platformLinks = [
+const platformLinks: NavLink[] = [
   { href: "/admin", label: "Özet", icon: LayoutDashboard },
   { href: "/admin/accounts", label: "Müşteriler", icon: Building2 },
   { href: "/admin/users", label: "Kullanıcılar", icon: Users },
   { href: "/admin/quote-requests", label: "Talepler", icon: ClipboardList },
 ];
+
+function linkActive(pathname: string, href: string) {
+  if (href === "/admin") return pathname === "/admin";
+  return pathname.startsWith(href);
+}
+
+function NavItem({
+  link,
+  pathname,
+  nested = false,
+}: {
+  link: NavLink;
+  pathname: string;
+  nested?: boolean;
+}) {
+  const Icon = link.icon;
+  const active = linkActive(pathname, link.href);
+  return (
+    <Link
+      href={link.href}
+      className={cn(
+        "flex items-center gap-3 rounded-xl py-2.5 text-sm transition",
+        nested ? "px-3 pl-9" : "px-3",
+        active
+          ? "bg-brand text-white"
+          : "text-white/70 hover:bg-white/5 hover:text-white",
+      )}
+    >
+      <Icon size={18} />
+      {link.label}
+    </Link>
+  );
+}
 
 export function AppShell({
   children,
@@ -55,9 +94,10 @@ export function AppShell({
 }) {
   const pathname = usePathname();
   const router = useRouter();
-  const visibleLinks = isPlatformAdmin ? platformLinks : tenantLinks;
+  const mobileLinks = isPlatformAdmin
+    ? platformLinks
+    : [...tenantMainLinks, ...tenantSettingsLinks];
 
-  // Süper admin yalnızca SaaS paneline erişir; müşteri ekranlarına düşmesin.
   useEffect(() => {
     if (!isPlatformAdmin) return;
     if (!pathname.startsWith("/admin")) {
@@ -65,7 +105,6 @@ export function AppShell({
     }
   }, [isPlatformAdmin, pathname, router]);
 
-  // Çevrimiçi tespiti: meşgul mesajı + dengeli dağıtım için lastActiveAt
   useEffect(() => {
     if (isPlatformAdmin) return;
     const beat = () => {
@@ -88,28 +127,28 @@ export function AppShell({
           </div>
         </div>
         <nav className="flex flex-1 flex-col gap-1 p-3">
-          {visibleLinks.map((link) => {
-            const Icon = link.icon;
-            const active =
-              link.href === "/admin"
-                ? pathname === "/admin"
-                : pathname.startsWith(link.href);
-            return (
-              <Link
-                key={link.href}
-                href={link.href}
-                className={cn(
-                  "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition",
-                  active
-                    ? "bg-brand text-white"
-                    : "text-white/70 hover:bg-white/5 hover:text-white",
-                )}
-              >
-                <Icon size={18} />
-                {link.label}
-              </Link>
-            );
-          })}
+          {isPlatformAdmin
+            ? platformLinks.map((link) => (
+                <NavItem key={link.href} link={link} pathname={pathname} />
+              ))
+            : (
+              <>
+                {tenantMainLinks.map((link) => (
+                  <NavItem key={link.href} link={link} pathname={pathname} />
+                ))}
+                <div className="mt-4 mb-1 px-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">
+                  Ayarlar
+                </div>
+                {tenantSettingsLinks.map((link) => (
+                  <NavItem
+                    key={link.href}
+                    link={link}
+                    pathname={pathname}
+                    nested
+                  />
+                ))}
+              </>
+            )}
         </nav>
         <div className="border-t border-white/10 p-4">
           <div className="text-sm font-medium">{userName}</div>
@@ -133,7 +172,7 @@ export function AppShell({
               WASYS
             </div>
             <div className="flex max-w-[60%] gap-2 overflow-x-auto text-xs">
-              {visibleLinks.map((l) => (
+              {mobileLinks.map((l) => (
                 <Link
                   key={l.href}
                   href={l.href}
