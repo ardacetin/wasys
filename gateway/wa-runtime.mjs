@@ -144,30 +144,6 @@ const REGISTRY_FILE = path.join(DATA_ROOT, "gateway-sessions.json");
 const LID_MAP_FILE = path.join(DATA_ROOT, "wa-lid-map.json");
 const logger = pino({ level: "info" });
 
-// #region agent log
-function agentDebugLog(location, message, data, hypothesisId, runId = "outbound") {
-  const payload = {
-    sessionId: "70991a",
-    runId,
-    hypothesisId,
-    location,
-    message,
-    data,
-    timestamp: Date.now(),
-  };
-  console.log(`[WASYS-DEBUG-70991a]`, JSON.stringify(payload));
-  try {
-    fs.mkdirSync(DATA_ROOT, { recursive: true });
-    fs.appendFileSync(
-      path.join(DATA_ROOT, "debug-70991a.ndjson"),
-      `${JSON.stringify(payload)}\n`,
-    );
-  } catch {
-    /* ignore */
-  }
-}
-// #endregion
-
 /** phoneDigits → @lid JID (iOS / Meta Ads sohbetleri için zorunlu) */
 const lidByPhone = new Map();
 
@@ -594,22 +570,6 @@ async function sendWithJidFallback(session, to, preferredJid, buildContent) {
   const lidPreferredChat = isLidJid(normalizeUserJid(preferredJid));
   let sawLidDeliveryMiss = false;
 
-  // #region agent log
-  agentDebugLog(
-    "wa-runtime.mjs:sendWithJidFallback",
-    "jid candidates resolved",
-    {
-      sessionId: session.sessionId,
-      channelId: session.channelId,
-      candidateCount: jids.length,
-      jids: jids.map((j) => (j.includes("@") ? j.split("@")[1] : j)),
-      phoneLen: phone?.length ?? 0,
-      lidPreferredChat,
-    },
-    "B",
-  );
-  // #endregion
-
   let lastError;
 
   for (const jid of jids) {
@@ -631,14 +591,6 @@ async function sendWithJidFallback(session, to, preferredJid, buildContent) {
         const wait = await waitForOutboundStatus(session, sock, result.key, 3, 9000);
         const acceptLid =
           wait.ok || (isLidJid(jid) && wait.maxStatus >= 2);
-        // #region agent log
-        agentDebugLog(
-          "wa-runtime.mjs:sendWithJidFallback",
-          "LID delivery wait result",
-          { jid, externalId, ok: wait.ok, maxStatus: wait.maxStatus, acceptLid },
-          "E",
-        );
-        // #endregion
         if (!acceptLid) {
           sawLidDeliveryMiss = true;
           logger.warn(
@@ -649,21 +601,6 @@ async function sendWithJidFallback(session, to, preferredJid, buildContent) {
         }
       } else if (lidPreferredChat || sawLidDeliveryMiss) {
         const wait = await waitForOutboundStatus(session, sock, result.key, 3, 12000);
-        // #region agent log
-        agentDebugLog(
-          "wa-runtime.mjs:sendWithJidFallback",
-          "PN delivery wait (LID chat)",
-          {
-            jid,
-            externalId,
-            ok: wait.ok,
-            maxStatus: wait.maxStatus,
-            lidPreferredChat,
-            sawLidDeliveryMiss,
-          },
-          "E",
-        );
-        // #endregion
         if (!wait.ok) {
           logger.warn(
             {
@@ -679,14 +616,6 @@ async function sendWithJidFallback(session, to, preferredJid, buildContent) {
         }
       }
 
-      // #region agent log
-      agentDebugLog(
-        "wa-runtime.mjs:sendWithJidFallback",
-        "outbound send accepted",
-        { jid, externalId, isLid: isLidJid(jid) },
-        "E",
-      );
-      // #endregion
       logger.info(
         { sessionId: session.sessionId, jid, externalId },
         "outbound WhatsApp send accepted",
@@ -1054,21 +983,6 @@ async function handleIncoming(session, msg, downloadMediaMessage) {
 
 async function ensureConnectedSession(sessionId, channelId) {
   let session = resolveLiveSession(sessionId, channelId);
-  // #region agent log
-  agentDebugLog(
-    "wa-runtime.mjs:ensureConnectedSession",
-    "session resolve",
-    {
-      requestedSessionId: sessionId,
-      channelId: channelId ?? null,
-      found: Boolean(session),
-      status: session?.status ?? null,
-      resolvedSessionId: session?.sessionId ?? null,
-      hasSock: Boolean(session?.sock),
-    },
-    "B",
-  );
-  // #endregion
   if (session?.sock && session.status === "CONNECTED") return session;
 
   // Bellekten düşmüş ama auth varsa yeniden ayağa kaldır

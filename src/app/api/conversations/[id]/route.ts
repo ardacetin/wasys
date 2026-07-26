@@ -4,7 +4,6 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { waGateway } from "@/lib/wa-gateway";
-import { agentDebugLog } from "@/lib/debug-agent-log";
 import { sendCloudText } from "@/lib/wa-cloud";
 import {
   explainInvalidSendPhone,
@@ -229,24 +228,6 @@ export async function POST(
         jid: preferredJid,
       };
 
-      // #region agent log
-      agentDebugLog(
-        "conversations/route.ts:send",
-        "outbound API send start",
-        {
-          conversationId: conversation.id,
-          channelId: conversation.channel.id,
-          dbSessionId: conversation.channel.sessionId,
-          activeSessionId,
-          sendPhoneLen: sendPhone.length,
-          hasWaJid: Boolean(preferredJid),
-          waJidSuffix: preferredJid?.split("@")[1] ?? null,
-          channelStatus: conversation.channel.status,
-        },
-        "A",
-      );
-      // #endregion
-
       if (payload.type === "AUDIO" && payload.mediaUrl) {
         const result = await waGateway.sendAudio({
           ...sendPayload,
@@ -277,18 +258,6 @@ export async function POST(
             data: { waJid: result.jid },
           }).catch(() => undefined);
         }
-        // #region agent log
-        agentDebugLog(
-          "conversations/route.ts:send",
-          "outbound API send ok",
-          {
-            externalId: result.externalId ?? null,
-            resultJid: result.jid ?? null,
-            type: "TEXT",
-          },
-          "E",
-        );
-        // #endregion
       }
       status = "SENT";
     } else if (conversation.channel.type === "WHATSAPP_CLOUD") {
@@ -306,16 +275,6 @@ export async function POST(
     }
   } catch (err) {
     console.error("[WASYS] outbound send failed", err);
-    // #region agent log
-    agentDebugLog(
-      "conversations/route.ts:send",
-      "outbound API send failed",
-      {
-        error: err instanceof Error ? err.message : String(err),
-      },
-      "C",
-    );
-    // #endregion
     status = "FAILED";
     sendError = err instanceof Error ? err.message : "Mesaj gönderilemedi";
   }
