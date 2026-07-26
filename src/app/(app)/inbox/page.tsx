@@ -11,8 +11,8 @@ import {
 import { setActiveConversationId } from "@/lib/browser-notifications";
 import { startVisibleInterval } from "@/lib/visible-poll";
 import {
+  canSendWhatsAppQrContact,
   explainInvalidSendPhone,
-  normalizeWhatsAppPhone,
 } from "@/lib/whatsapp-phone";
 import { cn, initials } from "@/lib/utils";
 
@@ -33,7 +33,7 @@ type Conversation = {
   lastMessageAt: string;
   lastMessagePreview: string | null;
   unreadCount: number;
-  contact: { id: string; name: string | null; phone: string; email: string | null };
+  contact: { id: string; name: string | null; phone: string; email: string | null; waJid?: string | null };
   assignedTo: { id: string; name: string } | null;
   tags: { tag: Tag }[];
   channel: { id: string; name: string; type: string; status: string };
@@ -96,7 +96,7 @@ export default function InboxPage() {
   const canSendWhatsApp = useMemo(() => {
     if (!selected?.channel) return true;
     if (selected.channel.type !== "WHATSAPP_QR") return true;
-    return Boolean(normalizeWhatsAppPhone(selected.contact.phone));
+    return canSendWhatsAppQrContact(selected.contact);
   }, [selected]);
 
   const sendBlockedReason = useMemo(() => {

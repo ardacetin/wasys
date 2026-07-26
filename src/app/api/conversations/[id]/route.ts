@@ -6,6 +6,7 @@ import { prisma } from "@/lib/db";
 import { waGateway } from "@/lib/wa-gateway";
 import { sendCloudText } from "@/lib/wa-cloud";
 import {
+  canSendWhatsAppQrContact,
   explainInvalidSendPhone,
   normalizeWhatsAppPhone,
 } from "@/lib/whatsapp-phone";
@@ -175,7 +176,7 @@ export async function POST(
           { status: 400 },
         );
       }
-      if (!sendPhone) {
+      if (!canSendWhatsAppQrContact(conversation.contact)) {
         return NextResponse.json(
           { error: explainInvalidSendPhone(conversation.contact.phone) },
           { status: 400 },
@@ -224,7 +225,7 @@ export async function POST(
       const sendPayload = {
         sessionId: activeSessionId,
         channelId: conversation.channel.id,
-        to: sendPhone,
+        to: sendPhone ?? "",
         jid: preferredJid,
       };
 
@@ -274,7 +275,15 @@ export async function POST(
       status = "SENT";
     }
   } catch (err) {
-    console.error("[WASYS] outbound send failed", err);
+    console.error("[WASYS] outbound send failed", {
+      message: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+      conversationId: conversation.id,
+      to: sendPhone,
+      jid: preferredJid,
+      channelSessionId: conversation.channel.sessionId,
+      channelStatus: conversation.channel.status,
+    });
     status = "FAILED";
     sendError = err instanceof Error ? err.message : "Mesaj gönderilemedi";
   }

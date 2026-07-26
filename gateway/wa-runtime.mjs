@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 /** Deploy doğrulama — UI/log'da bu ID yoksa Hostinger eski gateway dosyasını çalıştırıyordur. */
-export const GATEWAY_LOADER_ID = "wa-runtime-2026-07-26o";
+export const GATEWAY_LOADER_ID = "wa-runtime-2026-07-26p";
 
 function getConnectedSessionForChannel(channelId) {
   if (!channelId) return null;
@@ -443,6 +443,10 @@ async function resolveOutboundJid(sock, to, preferredJid) {
   const preferred = normalizeUserJid(preferredJid);
 
   if (!phone) {
+    if (preferred?.endsWith("@lid") || preferred?.endsWith("@hosted.lid")) {
+      push(preferred);
+      return { candidates, phone: "" };
+    }
     throw new Error(
       "Gönderim için gerçek telefon numarası gerekli. Kişi yalnızca WhatsApp gizli ID ile kayıtlı olabilir — yeni gelen mesaj bekleyin veya CRM’de numarayı düzeltin.",
     );
@@ -590,7 +594,9 @@ async function sendWithJidFallback(session, to, preferredJid, buildContent) {
       if (isLidJid(jid)) {
         const wait = await waitForOutboundStatus(session, sock, result.key, 3, 9000);
         const acceptLid =
-          wait.ok || (isLidJid(jid) && wait.maxStatus >= 2);
+          wait.ok ||
+          wait.maxStatus >= 2 ||
+          (wait.maxStatus === 0 && Boolean(externalId));
         if (!acceptLid) {
           sawLidDeliveryMiss = true;
           logger.warn(
@@ -598,6 +604,12 @@ async function sendWithJidFallback(session, to, preferredJid, buildContent) {
             "LID send got id but no ACK/delivery — trying next jid",
           );
           continue;
+        }
+        if (wait.maxStatus === 0) {
+          logger.info(
+            { sessionId: session.sessionId, jid, externalId, phone },
+            "LID send accepted on Baileys id (no status event within wait)",
+          );
         }
       } else if (lidPreferredChat || sawLidDeliveryMiss) {
         const wait = await waitForOutboundStatus(session, sock, result.key, 3, 12000);
@@ -629,9 +641,13 @@ async function sendWithJidFallback(session, to, preferredJid, buildContent) {
       logger.warn(
         {
           err,
+          stack: err instanceof Error ? err.stack : undefined,
           sessionId: session.sessionId,
+          sessionStatus: session.status,
           jid,
           to,
+          phone,
+          preferredJid,
         },
         "outbound send failed for jid — trying next",
       );
@@ -640,6 +656,21 @@ async function sendWithJidFallback(session, to, preferredJid, buildContent) {
 
   const detail =
     lastError instanceof Error ? lastError.message : String(lastError ?? "send failed");
+  logger.error(
+    {
+      err: lastError,
+      stack: lastError instanceof Error ? lastError.stack : undefined,
+      sessionId: session.sessionId,
+      sessionStatus: session.status,
+      to,
+      preferredJid,
+      phone,
+      lidPreferredChat,
+      sawLidDeliveryMiss,
+      loaderId: GATEWAY_LOADER_ID,
+    },
+    "sendWithJidFallback failed",
+  );
   throw new Error(
     `WhatsApp gönderilemedi: ${detail}. ${lidPreferredChat || sawLidDeliveryMiss ? "Bu sohbet LID (iOS/reklam); kişinin size yeni mesaj atması ve CRM’de doğru numara + waJid gerekir." : "Kanallar’dan bağlantıyı yenileyin."}`,
   );

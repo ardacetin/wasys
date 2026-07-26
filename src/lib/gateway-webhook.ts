@@ -18,6 +18,15 @@ import { waGateway } from "@/lib/wa-gateway";
 
 type AutoReplyChannel = { id: string; sessionId: string | null };
 
+/** LID id'si telefon alanına yazılmış kayıtlarda gönderim için kullanılmaz. */
+function dialablePhone(...candidates: string[]): string {
+  for (const raw of candidates) {
+    const p = String(raw ?? "").replace(/\D/g, "");
+    if (p.length >= 10 && p.length <= 13) return p;
+  }
+  return "";
+}
+
 export type GatewayWebhookResult = {
   status: number;
   body: Record<string, unknown>;
@@ -50,7 +59,11 @@ async function sendAutoReply(
       },
     });
   } catch (error) {
-    console.error("[WASYS auto-reply] otomatik mesaj gönderilemedi", error);
+    const detail =
+      error instanceof Error
+        ? { message: error.message, stack: error.stack, to: phone, jid }
+        : { error: String(error), to: phone, jid };
+    console.error("[WASYS auto-reply] otomatik mesaj gönderilemedi", detail);
   }
 }
 
@@ -286,19 +299,34 @@ export async function handleGatewayEvent(payload: any): Promise<GatewayWebhookRe
       });
     }
 
-    await runAutoReplies({
+    const autoReplyPhone = dialablePhone(phone, contact.phone);
+    const autoReplyJid = remoteJid ?? contact.waJid;
+    const autoReplyCtx = {
       organizationId: channel.organizationId,
       conversationId: conversation.id,
       contact,
       isNewConversation,
-      send: (text) =>
-        sendAutoReply(
-          channel,
-          conversation.id,
-          contact.phone,
-          text,
-          contact.waJid,
-        ),
+      channel,
+      autoReplyPhone,
+      autoReplyJid,
+    };
+    setImmediate(() => {
+      void runAutoReplies({
+        organizationId: autoReplyCtx.organizationId,
+        conversationId: autoReplyCtx.conversationId,
+        contact: autoReplyCtx.contact,
+        isNewConversation: autoReplyCtx.isNewConversation,
+        send: (text) =>
+          sendAutoReply(
+            autoReplyCtx.channel,
+            autoReplyCtx.conversationId,
+            autoReplyCtx.autoReplyPhone,
+            text,
+            autoReplyCtx.autoReplyJid,
+          ),
+      }).catch((err) => {
+        console.error("[WASYS auto-reply]", err);
+      });
     });
 
     return { status: 200, body: { ok: true } };

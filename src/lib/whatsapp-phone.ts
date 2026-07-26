@@ -1,3 +1,17 @@
+export function isWhatsAppLidJid(jid: string | null | undefined): boolean {
+  if (!jid || typeof jid !== "string") return false;
+  const n = jid.trim().toLowerCase();
+  return n.endsWith("@lid") || n.endsWith("@hosted.lid");
+}
+
+/** QR kanalında gönderim: dialable numara veya gelen sohbet @lid JID. */
+export function canSendWhatsAppQrContact(contact: {
+  phone: string;
+  waJid?: string | null;
+}): boolean {
+  return Boolean(normalizeWhatsAppPhone(contact.phone) || isWhatsAppLidJid(contact.waJid));
+}
+
 /** WhatsApp’a gönderim için geçerli telefon (rakam string). */
 export function normalizeWhatsAppPhone(raw: string | null | undefined): string | null {
   if (!raw) return null;
