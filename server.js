@@ -215,35 +215,36 @@ const handle = app.getRequestHandler();
 
 app
   .prepare()
-  .then(async () => {
-    // WhatsApp QR gateway (Baileys) runs inside the same process. Next talks to
-    // it in-process via globalThis.__wasysGateway (HTTP on :4001 is optional).
-    try {
-      const { pathToFileURL } = require("node:url");
-      const { statSync } = require("node:fs");
-      const runtimePath = resolve(projectRoot, "gateway/wa-runtime.mjs");
-      if (!existsSync(runtimePath)) {
-        throw new Error(
-          `gateway/wa-runtime.mjs yok (${runtimePath}). Son main commit'i Redeploy edin.`,
-        );
-      }
-      const bust = statSync(runtimePath).mtimeMs;
-      const { startGateway, GATEWAY_LOADER_ID } = await import(
-        `${pathToFileURL(runtimePath).href}?t=${bust}`
-      );
-      const listening = await startGateway();
-      console.log(
-        `[WASYS] WhatsApp gateway ready loader=${GATEWAY_LOADER_ID || "?"} (in-process${listening ? ` + http://127.0.0.1:${process.env.GATEWAY_PORT || 4001}` : " only"})`,
-      );
-    } catch (error) {
-      console.error("[WASYS] WhatsApp gateway failed to start", error);
-    }
-
+  .then(() => {
+    // Önce HTTP — Baileys/gateway boot'u siteyi asla bekletmesin (Hostinger timeout).
     createServer((req, res) => {
       const parsedUrl = parse(req.url, true);
       handle(req, res, parsedUrl);
     }).listen(port, hostname, () => {
       console.log(`[WASYS] Ready on http://${hostname}:${port}`);
+
+      void (async () => {
+        try {
+          const { pathToFileURL } = require("node:url");
+          const { statSync } = require("node:fs");
+          const runtimePath = resolve(projectRoot, "gateway/wa-runtime.mjs");
+          if (!existsSync(runtimePath)) {
+            throw new Error(
+              `gateway/wa-runtime.mjs yok (${runtimePath}). Son main commit'i Redeploy edin.`,
+            );
+          }
+          const bust = statSync(runtimePath).mtimeMs;
+          const { startGateway, GATEWAY_LOADER_ID } = await import(
+            `${pathToFileURL(runtimePath).href}?t=${bust}`
+          );
+          const listening = await startGateway();
+          console.log(
+            `[WASYS] WhatsApp gateway ready loader=${GATEWAY_LOADER_ID || "?"} (in-process${listening ? ` + http://127.0.0.1:${process.env.GATEWAY_PORT || 4001}` : " only"})`,
+          );
+        } catch (error) {
+          console.error("[WASYS] WhatsApp gateway failed to start", error);
+        }
+      })();
     });
   })
   .catch((error) => {

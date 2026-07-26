@@ -535,25 +535,45 @@ const server = http.createServer(async (req, res) => {
 export async function startGateway() {
   ensureAuthDir();
 
-  try {
-    await getBaileys();
-    logger.info({ loaderId: GATEWAY_LOADER_ID }, "Baileys module loaded");
-  } catch (error) {
-    logger.error({ err: error, loaderId: GATEWAY_LOADER_ID }, "Baileys load failed at gateway start");
-    throw error;
-  }
-
+  // Ops'u hemen kaydet — site boot'u Baileys yüklemesini beklememeli.
+  // İlk QR / session start getBaileys() ile lazy yükler.
   globalThis.__wasysGateway = gatewayOps;
   globalThis.__wasysGatewayLoaderId = GATEWAY_LOADER_ID;
+
+  void getBaileys()
+    .then(() => {
+      logger.info({ loaderId: GATEWAY_LOADER_ID }, "Baileys module loaded (lazy)");
+    })
+    .catch((error) => {
+      logger.error(
+        { err: error, loaderId: GATEWAY_LOADER_ID },
+        "Baileys preload failed (QR connect will retry)",
+      );
+    });
 
   return new Promise((resolve) => {
     let settled = false;
     const settle = (listening) => {
       if (settled) return;
       settled = true;
-      resumeSessions();
+      clearTimeout(failSafe);
+      // Session resume Baileys ister; boot'u bloklamadan arka planda dene.
+      setImmediate(() => {
+        try {
+          resumeSessions();
+        } catch (err) {
+          logger.warn({ err }, "resumeSessions failed");
+        }
+      });
       resolve(listening);
     };
+
+    const failSafe = setTimeout(() => {
+      logger.warn(
+        `Gateway HTTP listen timeout on :${PORT} — continuing in-process only`,
+      );
+      settle(false);
+    }, 3000);
 
     server.on("error", (err) => {
       if (err.code === "EADDRINUSE") {
