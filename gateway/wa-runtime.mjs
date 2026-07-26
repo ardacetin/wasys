@@ -5,7 +5,30 @@ import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 /** Deploy doğrulama — UI/log'da bu ID yoksa Hostinger eski gateway dosyasını çalıştırıyordur. */
-export const GATEWAY_LOADER_ID = "wa-runtime-2026-07-26h";
+export const GATEWAY_LOADER_ID = "wa-runtime-2026-07-26j";
+
+function getConnectedSessionForChannel(channelId) {
+  if (!channelId) return null;
+  for (const session of sessions.values()) {
+    if (
+      session.channelId === channelId &&
+      session.status === "CONNECTED" &&
+      session.sock
+    ) {
+      return session;
+    }
+  }
+  return null;
+}
+
+/** DB sessionId eski kalsa bile kanala bağlı canlı soketi bul. */
+function resolveLiveSession(sessionId, channelId) {
+  const direct = sessions.get(sessionId);
+  if (direct?.sock && direct.status === "CONNECTED") return direct;
+  const byChannel = getConnectedSessionForChannel(channelId);
+  if (byChannel) return byChannel;
+  return direct ?? null;
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -144,7 +167,7 @@ function saveLidMap() {
 function rememberLidMapping(phone, remoteJid) {
   const digits = String(phone ?? "").replace(/\D/g, "");
   if (!digits || !remoteJid || typeof remoteJid !== "string") return;
-  if (!remoteJid.endsWith("@lid")) return;
+  if (!remoteJid.endsWith("@lid") && !remoteJid.endsWith("@hosted.lid")) return;
   const prev = lidByPhone.get(digits);
   if (prev === remoteJid) return;
   lidByPhone.set(digits, remoteJid);
@@ -397,9 +420,8 @@ function extractRealPhone(to, preferredJid) {
 }
 
 /**
- * Baileys 6.7.x: asıl hedef PN (@s.whatsapp.net).
- * @lid yalnızca gerçek telefon yoksa veya PN send patlarsa yedek.
- * ACK bekleme yok — messages.update çoğu kurulumda gelmiyor (yanlış "onay yok" hatası).
+ * Giden JID: sohbet @lid ise önce LID (Meta/iOS), sonra PN.
+ * Yalnızca PN çoğu kurulumda Baileys id döndürür ama karşıya düşmez.
  */
 async function resolveOutboundJid(sock, to, preferredJid) {
   const candidates = [];
@@ -417,19 +439,25 @@ async function resolveOutboundJid(sock, to, preferredJid) {
     );
   }
 
-  // 1) Gerçek telefon JID (yalnızca PN — @lid sessiz başarısızlık yapıyordu)
-  push(`${phone}@s.whatsapp.net`);
+  if (preferred?.endsWith("@lid") || preferred?.endsWith("@hosted.lid")) {
+    push(preferred);
+  }
+
+  const mappedLid = lidByPhone.get(phone);
+  if (mappedLid) push(mappedLid);
+
+  let onWaHit = null;
   try {
     const results = await sock.onWhatsApp(phone);
-    const hit = Array.isArray(results) ? results[0] : null;
-    if (hit?.exists === false) {
+    onWaHit = Array.isArray(results) ? results[0] : null;
+    if (onWaHit?.exists === false) {
       throw new Error(`Bu numara WhatsApp’ta yok: ${phone}`);
     }
-    if (hit?.exists && hit.jid) push(hit.jid);
-    if (hit?.lid && phone) {
-      const lidJid = String(hit.lid).includes("@")
-        ? String(hit.lid)
-        : `${hit.lid}@lid`;
+    if (onWaHit?.exists && onWaHit.lid) {
+      const lidJid = String(onWaHit.lid).includes("@")
+        ? String(onWaHit.lid)
+        : `${onWaHit.lid}@lid`;
+      push(lidJid);
       rememberLidMapping(phone, lidJid);
     }
   } catch (err) {
@@ -437,11 +465,58 @@ async function resolveOutboundJid(sock, to, preferredJid) {
     logger.warn({ err, phone }, "onWhatsApp lookup failed");
   }
 
+  push(`${phone}@s.whatsapp.net`);
+  if (onWaHit?.exists && onWaHit.jid) push(onWaHit.jid);
   if (preferred?.endsWith("@s.whatsapp.net") || preferred?.endsWith("@hosted")) {
     push(preferred);
   }
 
-  return { candidates, phone, lidFallback: null };
+  if (!candidates.length) {
+    throw new Error("Gönderim adresi çözülemedi");
+  }
+  return { candidates, phone };
+}
+
+function isLidJid(jid) {
+  return (
+    typeof jid === "string" &&
+    (jid.endsWith("@lid") || jid.endsWith("@hosted.lid"))
+  );
+}
+
+/** Baileys status: 3 = delivered, 4 = read */
+function waitForOutboundStatus(sock, messageKey, minStatus, timeoutMs) {
+  const id = messageKey?.id;
+  if (!id || !sock?.ev?.on) return Promise.resolve(false);
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (ok) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        sock.ev.off("messages.update", handler);
+      } catch {
+        /* ignore */
+      }
+      resolve(ok);
+    };
+
+    const handler = (updates) => {
+      for (const u of updates) {
+        if (u.key?.id !== id) continue;
+        const st = u.update?.status;
+        if (typeof st === "number" && st >= minStatus) {
+          finish(true);
+          return;
+        }
+      }
+    };
+
+    sock.ev.on("messages.update", handler);
+    const timer = setTimeout(() => finish(false), timeoutMs);
+  });
 }
 
 async function sendWithJidFallback(session, to, preferredJid, buildContent) {
@@ -473,7 +548,19 @@ async function sendWithJidFallback(session, to, preferredJid, buildContent) {
         throw new Error("sendMessage kimlik (id) döndürmedi");
       }
 
-      if (phone && jid.endsWith("@lid")) rememberLidMapping(phone, jid);
+      if (phone && isLidJid(jid)) rememberLidMapping(phone, jid);
+
+      // LID: sunucu id döner ama karşıya düşmeyebilir — teslimat (3+) bekle, yoksa sıradaki JID.
+      if (isLidJid(jid)) {
+        const delivered = await waitForOutboundStatus(sock, result.key, 3, 9000);
+        if (!delivered) {
+          logger.warn(
+            { sessionId: session.sessionId, jid, externalId, phone },
+            "LID send got id but no delivery — trying next jid",
+          );
+          continue;
+        }
+      }
 
       // Başarılı kabul: Baileys id döndü. ACK event'i bekleme (false negative).
       logger.info(
@@ -482,8 +569,7 @@ async function sendWithJidFallback(session, to, preferredJid, buildContent) {
       );
       return {
         externalId,
-        // UI/DB için mümkünse PN JID yaz (LID'yi waJid olarak dayatma)
-        jid: phone ? `${phone}@s.whatsapp.net` : jid,
+        jid,
       };
     } catch (err) {
       lastError = err;
@@ -501,7 +587,9 @@ async function sendWithJidFallback(session, to, preferredJid, buildContent) {
 
   const detail =
     lastError instanceof Error ? lastError.message : String(lastError ?? "send failed");
-  throw new Error(`WhatsApp gönderilemedi: ${detail}`);
+  throw new Error(
+    `WhatsApp gönderilemedi: ${detail}. LID sohbetlerinde kişinin size yeni mesaj atması ve CRM’de doğru numara + waJid olması gerekir.`,
+  );
 }
 
 function unwrapMessageContent(message) {
@@ -830,8 +918,8 @@ async function handleIncoming(session, msg, downloadMediaMessage) {
   });
 }
 
-async function ensureConnectedSession(sessionId) {
-  let session = sessions.get(sessionId);
+async function ensureConnectedSession(sessionId, channelId) {
+  let session = resolveLiveSession(sessionId, channelId);
   if (session?.sock && session.status === "CONNECTED") return session;
 
   // Bellekten düşmüş ama auth varsa yeniden ayağa kaldır
@@ -839,7 +927,7 @@ async function ensureConnectedSession(sessionId) {
     const authDir = path.join(AUTH_ROOT, sessionId);
     if (fs.existsSync(path.join(authDir, "creds.json"))) {
       logger.warn({ sessionId }, "session missing in memory — hot-resuming for send");
-      let channelId = sessionId;
+      let resumeChannelId = channelId || sessionId;
       let webhookUrl = process.env.WEBHOOK_BASE_URL
         ? `${process.env.WEBHOOK_BASE_URL}/api/webhooks/wa-gateway`
         : `http://127.0.0.1:${process.env.PORT || 3000}/api/webhooks/wa-gateway`;
@@ -849,14 +937,14 @@ async function ensureConnectedSession(sessionId) {
           const hit = Array.isArray(entries)
             ? entries.find((e) => e?.sessionId === sessionId)
             : null;
-          if (hit?.channelId) channelId = hit.channelId;
+          if (hit?.channelId) resumeChannelId = hit.channelId;
           if (hit?.webhookUrl) webhookUrl = hit.webhookUrl;
         }
       } catch {
         /* ignore */
       }
       session = {
-        channelId,
+        channelId: resumeChannelId,
         sessionId,
         webhookUrl,
         status: "CONNECTING",
@@ -887,13 +975,13 @@ async function ensureConnectedSession(sessionId) {
   );
 }
 
-async function sendText(sessionId, to, text, jid) {
-  const session = await ensureConnectedSession(sessionId);
+async function sendText(sessionId, to, text, jid, channelId) {
+  const session = await ensureConnectedSession(sessionId, channelId);
   return sendWithJidFallback(session, to, jid, () => ({ text }));
 }
 
-async function sendAudio(sessionId, to, audioUrl, ptt = true, jid) {
-  const session = await ensureConnectedSession(sessionId);
+async function sendAudio(sessionId, to, audioUrl, ptt = true, jid, channelId) {
+  const session = await ensureConnectedSession(sessionId, channelId);
   const localPath = audioUrl.startsWith("/")
     ? path.join(process.cwd(), "public", audioUrl.replace(/^\//, ""))
     : audioUrl;
@@ -903,6 +991,20 @@ async function sendAudio(sessionId, to, audioUrl, ptt = true, jid) {
     mimetype: "audio/ogg; codecs=opus",
     ptt,
   }));
+}
+
+async function getChannelStatus(sessionId, channelId) {
+  const session = resolveLiveSession(sessionId, channelId);
+  if (!session) {
+    throw new Error("Session not found");
+  }
+  return {
+    status: session.status,
+    sessionId: session.sessionId,
+    qrDataUrl: session.qrDataUrl,
+    phoneNumber: session.phoneNumber,
+    lastError: session.lastError,
+  };
 }
 
 export const gatewayOps = {
@@ -940,6 +1042,22 @@ export const gatewayOps = {
 
     await getBaileys();
 
+    for (const [sid, s] of [...sessions.entries()]) {
+      if (s.channelId === channelId && sid !== sessionId) {
+        logger.warn(
+          { channelId, oldSessionId: sid, newSessionId: sessionId },
+          "replacing duplicate WhatsApp session for channel",
+        );
+        s.intentionalStop = true;
+        clearReconnectTimer(s);
+        if (s.sock) {
+          endSocketQuietly(s.sock);
+          s.sock = null;
+        }
+        sessions.delete(sid);
+      }
+    }
+
     let session = sessions.get(sessionId);
     if (!session) {
       session = { channelId, sessionId, webhookUrl, status: "CONNECTING" };
@@ -966,10 +1084,15 @@ export const gatewayOps = {
     if (!session) throw new Error("Session not found");
     return {
       status: session.status,
+      sessionId: session.sessionId,
       qrDataUrl: session.qrDataUrl,
       phoneNumber: session.phoneNumber,
       lastError: session.lastError,
     };
+  },
+
+  async getChannelStatus({ sessionId, channelId }) {
+    return getChannelStatus(sessionId, channelId);
   },
 
   async stopSession(sessionId) {
@@ -992,12 +1115,12 @@ export const gatewayOps = {
     return { ok: true };
   },
 
-  async sendText({ sessionId, to, text, jid }) {
-    return sendText(sessionId, to, text, jid);
+  async sendText({ sessionId, channelId, to, text, jid }) {
+    return sendText(sessionId, to, text, jid, channelId);
   },
 
-  async sendAudio({ sessionId, to, audioUrl, ptt = true, jid }) {
-    return sendAudio(sessionId, to, audioUrl, ptt, jid);
+  async sendAudio({ sessionId, channelId, to, audioUrl, ptt = true, jid }) {
+    return sendAudio(sessionId, to, audioUrl, ptt, jid, channelId);
   },
 };
 

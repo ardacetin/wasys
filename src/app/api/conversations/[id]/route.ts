@@ -182,8 +182,13 @@ export async function POST(
         );
       }
 
+      let activeSessionId = conversation.channel.sessionId;
+
       try {
-        const live = await waGateway.getStatus(conversation.channel.sessionId);
+        const live = await waGateway.getChannelStatus(
+          conversation.channel.sessionId,
+          conversation.channel.id,
+        );
         if (live.status !== "CONNECTED") {
           await prisma.channel.update({
             where: { id: conversation.channel.id },
@@ -199,6 +204,13 @@ export async function POST(
             { status: 503 },
           );
         }
+        if (live.sessionId && live.sessionId !== conversation.channel.sessionId) {
+          activeSessionId = live.sessionId;
+          await prisma.channel.update({
+            where: { id: conversation.channel.id },
+            data: { sessionId: live.sessionId },
+          }).catch(() => undefined);
+        }
       } catch {
         return NextResponse.json(
           {
@@ -209,12 +221,17 @@ export async function POST(
         );
       }
 
+      const sendPayload = {
+        sessionId: activeSessionId,
+        channelId: conversation.channel.id,
+        to: sendPhone,
+        jid: preferredJid,
+      };
+
       if (payload.type === "AUDIO" && payload.mediaUrl) {
         const result = await waGateway.sendAudio({
-          sessionId: conversation.channel.sessionId,
-          to: sendPhone,
+          ...sendPayload,
           audioUrl: payload.mediaUrl,
-          jid: preferredJid,
         });
         externalId = result.externalId;
         if (!externalId) {
@@ -228,10 +245,8 @@ export async function POST(
         }
       } else {
         const result = await waGateway.sendText({
-          sessionId: conversation.channel.sessionId,
-          to: sendPhone,
+          ...sendPayload,
           text: payload.body,
-          jid: preferredJid,
         });
         externalId = result.externalId;
         if (!externalId) {

@@ -20,6 +20,17 @@ type GatewayOps = {
   }>;
   getStatus: (sessionId: string) => Promise<{
     status: string;
+    sessionId?: string;
+    qrDataUrl?: string;
+    phoneNumber?: string;
+    lastError?: string;
+  }>;
+  getChannelStatus: (payload: {
+    sessionId: string;
+    channelId: string;
+  }) => Promise<{
+    status: string;
+    sessionId: string;
     qrDataUrl?: string;
     phoneNumber?: string;
     lastError?: string;
@@ -27,12 +38,14 @@ type GatewayOps = {
   stopSession: (sessionId: string) => Promise<{ ok: boolean }>;
   sendText: (payload: {
     sessionId: string;
+    channelId?: string;
     to: string;
     text: string;
     jid?: string | null;
   }) => Promise<{ externalId?: string; jid?: string }>;
   sendAudio: (payload: {
     sessionId: string;
+    channelId?: string;
     to: string;
     audioUrl: string;
     ptt?: boolean;
@@ -227,6 +240,14 @@ export const waGateway = {
     return ops.getStatus(sessionId);
   },
 
+  async getChannelStatus(sessionId: string, channelId: string) {
+    const ops = await ensureGateway();
+    if (ops.getChannelStatus) {
+      return ops.getChannelStatus({ sessionId, channelId });
+    }
+    return ops.getStatus(sessionId);
+  },
+
   async stopSession(sessionId: string) {
     const viaHttp = await gatewayHttp<{ ok: boolean }>(
       `/sessions/${encodeURIComponent(sessionId)}/stop`,
@@ -239,6 +260,7 @@ export const waGateway = {
 
   async sendText(payload: {
     sessionId: string;
+    channelId?: string;
     to: string;
     text: string;
     jid?: string | null;
@@ -280,6 +302,7 @@ export const waGateway = {
 
   async sendAudio(payload: {
     sessionId: string;
+    channelId?: string;
     to: string;
     audioUrl: string;
     ptt?: boolean;

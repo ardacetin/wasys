@@ -16,7 +16,7 @@ import {
 } from "@/lib/disconnect-alert";
 import { waGateway } from "@/lib/wa-gateway";
 
-type AutoReplyChannel = { sessionId: string | null };
+type AutoReplyChannel = { id: string; sessionId: string | null };
 
 export type GatewayWebhookResult = {
   status: number;
@@ -34,6 +34,7 @@ async function sendAutoReply(
   try {
     const result = await waGateway.sendText({
       sessionId: channel.sessionId,
+      channelId: channel.id,
       to: phone,
       text,
       jid: jid ?? undefined,
